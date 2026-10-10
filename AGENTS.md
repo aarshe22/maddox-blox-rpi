@@ -1,0 +1,46 @@
+# Maddox Blox
+
+Brick-toy inspired Three.js sandbox game. No build step: static files + one npm dep (`three`), served by any static server.
+
+## Run
+- `npm run dev` (serves on http://127.0.0.1:8016), or any static server from the repo root.
+- `index.html` uses an import map that points `three` at `node_modules` (no bundler).
+
+## Structure
+- `src/main.js` — the whole game: World (terrain, river, bridge, village, trees, hills), Player (AABB + step-up collision), Game (input, build/remove, collectibles, HUD, camera).
+- `src/options.js` — ⚙️ world options: map-size presets Tiny/Small/Large/Huge (real half-extents 44/60/96/144, cap 160; each preset also scales generation capacity: towns/rural/farms/spots/trees/terrain zones/train ring), and `OBJECT_TYPES` (house/school/church/store/playground/mountain/volcano/tree/flower/deco) each with a count slider + on/off toggle. Persisted in `localStorage` (`maddox-blox-options-v1`); applied on "Regenerate world", no page reload. Options panel also carries Sound & Fall-debug toggles (persisted too).
+- `src/mosaic.js` — the single source-image asset (`assets/maddox-face-8color.png`, 8-color indexed PNG, decoded by hand so palette indices stay exact). Drives the welcome-dialog brick mosaic, the giant monument wall mosaic (instanced 3-brick-deep cells, flood-filled background removed) and the portal plaque.
+- The one giant monument (`World.buildMonumentSite`) needs far-bank room (Large+); plaza/steps/pedestal are walkable solids. `World.surfaceTopAny` + `respawnPlayer` handle below-world fall recovery via respawn anchors.
+- Bricks snap to a 1-unit XZ grid. `World.solids` is the single AABB collider list; `World.surfaceTop()` backs both player gravity and build snapping.
+- Overworld meshes/colliders live in a per-build bucket group (`World.over`); `World.rebuild()` disposes that group (skipping shared primitives `BR/CY/SP/CO` and cached stud meshes) and rebuilds from current options. Player/collectibles respawn in `Game.regenerateWorld()`. Everything positional scales off `World.half`/`World.k` — no absolute map constants.
+
+## Deployment (demo.badlandscloud.com/game/)
+- SSH as root uses key-based auth (ed25519 deploy key installed in root's `authorized_keys`);
+  connect with the local ssh config / paramiko key-first helper — no password auth needed.
+  Never commit private keys or credential paths to this public repo.
+- Canonical git repo: GitHub `aarshe22/llm-harness-demos` (gallery root repo; this game lives in
+  `game/`). Server-side bare clone at `~demo1/git/llm-harness-demos.git` with work-tree = httpdocs.
+  Commit against that, push to GitHub. Do not re-add a nested .git inside game/.
+- Plesk + Passenger run a Node gallery app (`server.js`). It scans top-level folders in
+  `httpdocs/` and only serves folders with an `index.html` **directly inside** them.
+  Deploy flat into `httpdocs/game/` (never `game/game/`), owned `demo1:psacln`, dirs 755 / files 644.
+- TRAP: `httpdocs` itself must stay `demo1:psaserv` 750 (nginx runs as the psaserv group). A blanket
+  `chown -R demo1:psacln httpdocs` returns 403 on every demo — re-chown just the dir and reload nginx.
+- Vendored runtime deps (no install step on the server): `index.html`, `src/`, and
+  `node_modules/three/{package.json, build/three.module.js, build/three.core.js, examples/jsm/utils/BufferGeometryUtils.js}`.
+  r186's `three.module.js` starts with `export * from './three.core.js'` — omitting it 404s at runtime.
+  Always verify the deployed URL in a real browser; a local run with full `node_modules` will not catch it.
+- The server's nested original copy is parked in `/tmp/game-old`.
+- `demo.json` is intentionally absent: its `modelName`/`harness`/`totalTokens` fields are real
+  gallery provenance. Add one manually if the card should show them.
+
+## Gotchas
+- `mergeGeometries` needs non-indexed geometry with normals deleted before merging (see `bake()`); empty part lists must short-circuit.
+- Raycast face normals need `applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(...))` — `Vector3` has no `transformNormal`.
+- Colliders that must never act as build supports (trees, bridge pieces, ground) are flagged `noSupport`. Rubble piles from destroyed props DO get solids (walkable on top); road slabs have tops at y≈0.14 with min.y −0.1.
+- `src/voice.js` (Web Speech TTS) + Sound & Fall-debug toggles live in the ⚙️ options panel (persisted with the other options); the old floating debug button is gone, F9 remains a hidden DBG toggle. Exit-through-doorway fall is prevented by a door-threshold collider + floor overrun in `src/interior.js` — walking out is blocked; exiting requires E/EXIT, which uses the exterior spot finder.
+- Testing: no browser JS harness in-repo; drive headless chromium via CDP (websocket-client installed), `node --check` per ES module, and headless `import('/src/...')` smoke tests. CDP eval gotchas: no top-level await in `Runtime.evaluate`, `window.THREE` must be set from inside an async IIFE, `speechSynthesis` is non-writable (stub with defineProperty), singleton module methods replaced via `obj.m = fn` need `delete obj.m` to restore.
+- Bridge decks are walkable because their collider tops equal deck-surface height within the step tolerance (1.05).
+- three r186: `PCFSoftShadowMap` was removed (use `PCFShadowMap`); `THREE.Clock` is deprecated but works.
+- Renderer uses `preserveDrawingBuffer: true` so canvas pixel checks work in headless verification.
+- No LEGO trademarks, logos, set names, or minifigure designs in UI or assets; generic "brick-toy" terms only.

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<link rel="icon" type="image/png" href="assets/favicon.png">
+  <title>Maddox Blox</title>
+<link rel="stylesheet" href="src/styles.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="hud">
+  <div class="panel" id="panel-goal">
+    <div class="title">Maddox Blox</div>
+    <div class="row"><span class="brick-dot"></span><b id="hud-count">0</b>&nbsp;bricks collected</div>
+    <div class="row" id="hud-need">Collect 30 more to fix the rainbow bridge</div>
+  </div>
+
+  <div id="hotbar"></div>
+  <div id="stripbar" class="hidden"></div>
+
+  <div class="panel" id="panel-hint">
+    <div id="hint-desktop">WASD move · drag look · Space jump · E doors · Esc explore · B build · V weapon · C weather · ⚙️ options</div>
+    <div id="hint-touch">drag right = look · pad = move · ENTER doors · mode buttons 🧭🧱⚔️🌦️ · ⚙️ options</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="intro" onclick="if(event.target===this)document.getElementById('btn-play').click()">
+  <div class="card">
+    <img id="welcome-banner" alt="Maddox Blox welcome — 8-color brick mosaic portrait" />
+    <h1>Maddox Blox</h1>
+    <p>A brick-toy sandbox. Gather loose bricks, build whatever you like,
+       and repair the broken rainbow bridge.</p>
+    <ul>
+      <li><b>WASD / arrows</b> move · <b>Space</b> jump · <b>E</b> enter/exit house doors</li>
+      <li><b>Drag</b> to orbit the camera · <b>scroll / pinch</b> to zoom</li>
+      <li><b>Click / tap</b> to place a brick · <b>X</b> or remove-slot tap to break bricks</li>
+      <li><b>1-6</b> pick a brick type</li>
+      <li>Houses have interiors! Kitchen, bathroom, bedroom, wall TV — go knock.</li>
+      <li>⚙️ <b>Options</b>: Tiny → Huge maps (bigger playable world: towns, farms, roads, zones), change object counts, regenerate.</li>
+      <li>🗿 Cross the river to find the <b>giant face-mosaic monument</b> — one 1×1 brick per pixel of the welcome portrait (256×225 = 57,600 bricks).</li>
+    </ul>
+    <button id="btn-play">Start building</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
