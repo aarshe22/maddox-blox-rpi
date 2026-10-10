@@ -3789,6 +3789,133 @@ class Game {
     this.jumpBtn.addEventListener('click', (e) => { e.preventDefault(); this.jumpQueued = 0.16; });
     this.enterBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.toggleDoor(); }, { passive: false });
     this.enterBtn.addEventListener('click', (e) => { e.preventDefault(); this.toggleDoor(); });
+    this.bindGamepad();
+  }
+
+  /* Bluetooth / USB controllers via the Gamepad API. Chrome reports a pad
+     after it connects; we also scan each frame so a pad that was already
+     paired is picked up without a settings screen. */
+  bindGamepad() {
+    this.padVec = { x: 0, y: 0 };
+    this.padFire = false;
+    this._padIndex = null;
+    this._padPrev = [];
+    window.addEventListener('gamepadconnected', (e) => this.noteGamepad(e.gamepad));
+    window.addEventListener('gamepaddisconnected', (e) => {
+      if (e.gamepad.index !== this._padIndex) return;
+      this._padIndex = null;
+      this.padVec.x = 0;
+      this.padVec.y = 0;
+      this.padFire = false;
+      this.toast('Controller disconnected', 'bad');
+    });
+  }
+
+  noteGamepad(gp) {
+    if (!gp || gp.index === this._padIndex) return;
+    this._padIndex = gp.index;
+    this._padPrev = [];
+    const name = String(gp.id || 'Controller').split('(')[0].trim();
+    this.toast(name + ' — stick move, A jump, Y mode, RT use', 'good');
+  }
+
+  pollGamepad(dt) {
+    if (!this.padVec) this.padVec = { x: 0, y: 0 };
+    if (!navigator.getGamepads) return;
+    const pads = navigator.getGamepads();
+    let gp = this._padIndex != null ? pads[this._padIndex] : null;
+    if (!gp) {
+      for (const g of pads) if (g) { gp = g; break; }
+      if (!gp) {
+        this.padVec.x = 0;
+        this.padVec.y = 0;
+        this.padFire = false;
+        return;
+      }
+      this.noteGamepad(gp);
+    }
+    const axis = (v) => {
+      const n = Number(v) || 0;
+      const d = 0.18;
+      if (Math.abs(n) < d) return 0;
+      return Math.sign(n) * (Math.abs(n) - d) / (1 - d);
+    };
+    const btn = (i) => {
+      const b = gp.buttons[i];
+      const value = b ? (typeof b === 'object' ? b.value : b) : 0;
+      const down = value > 0.45;
+      const edge = down && !(this._padPrev[i] > 0.45);
+      this._padPrev[i] = value;
+      return { down, edge, value };
+    };
+    const b = [];
+    for (let i = 0; i < 16; i++) b[i] = btn(i);
+
+    if (this.panel?.isOpen) {
+      this.padVec.x = 0;
+      this.padVec.y = 0;
+      this.padFire = false;
+      if (b[1].edge && this.panel.close) this.panel.close();
+      return;
+    }
+    if (!this.started && (b[0].edge || b[9].edge)) this.start();
+
+    const selectMode = this.mode === 'weapon' || this.mode === 'weather';
+    let lx = axis(gp.axes[0]);
+    let ly = axis(gp.axes[1]);
+    if (b[12].down) ly = -1;
+    if (b[13].down) ly = 1;
+    if (!selectMode) {
+      if (b[14].down) lx = -1;
+      if (b[15].down) lx = 1;
+    }
+    this.padVec.x = lx;
+    this.padVec.y = ly;
+
+    const rx = axis(gp.axes[2]);
+    const ry = axis(gp.axes[3]);
+    if (rx || ry) {
+      this.orbit.yaw -= rx * dt * 2.4;
+      this.orbit.pitch = clamp(this.orbit.pitch + ry * dt * 1.7, -0.18, 1.32);
+    }
+
+    const repeat = (slot, spec) => {
+      if (!spec.down) return false;
+      const now = performance.now();
+      if (!spec.edge && now - (this[slot] || 0) < 180) return false;
+      this[slot] = now;
+      return true;
+    };
+    if (selectMode && repeat('_padDpadT', b[14])) this.nudgeStrip(-1);
+    if (selectMode && repeat('_padDpadT', b[15])) this.nudgeStrip(1);
+    if (repeat('_padLbT', b[4])) this.padShoulder(-1);
+    if (repeat('_padRbT', b[5])) this.padShoulder(1);
+
+    if (b[0].edge) this.jumpQueued = 0.16;
+    if (b[1].edge) this.setMode('explore');
+    if (b[2].edge) this.toggleDoor();
+    if (b[3].edge) {
+      const order = MODES.map((m) => m.id);
+      this.setMode(order[(order.indexOf(this.mode) + 1) % order.length]);
+    }
+    this.padFire = this.mode === 'weapon' && b[7].down;
+    if (b[7].edge && this.mode !== 'weapon') this.padUse();
+  }
+
+  padShoulder(dir) {
+    if (this.mode === 'weapon' || this.mode === 'weather') { this.nudgeStrip(dir); return; }
+    if (this.mode === 'build') {
+      const n = BRICKS.length + 1;
+      this.selectSlot((this.slot + dir + n) % n);
+      return;
+    }
+    const order = MODES.map((m) => m.id);
+    this.setMode(order[(order.indexOf(this.mode) + dir + order.length) % order.length]);
+  }
+
+  padUse() {
+    const r = this.canvas.getBoundingClientRect();
+    this.actuate({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
   }
 
   touchUi(e) {
@@ -4153,12 +4280,13 @@ class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     this.time += dt;
     this.jumpQueued = Math.max(0, this.jumpQueued - dt);
+    this.pollGamepad(dt);
 
     const k = this.keys;
     let mx = (k.has('r') ? 1 : 0) - (k.has('l') ? 1 : 0);
     let mz = (k.has('b') ? 1 : 0) - (k.has('f') ? 1 : 0);
-    mx += this.joyVec.x;
-    mz += this.joyVec.y;
+    mx += this.joyVec.x + (this.padVec ? this.padVec.x : 0);
+    mz += this.joyVec.y + (this.padVec ? this.padVec.y : 0);
     const len = Math.hypot(mx, mz);
     if (len > 1) { mx /= len; mz /= len; }
 
@@ -4172,6 +4300,7 @@ class Game {
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.tickWeaponRig(dt);
     if (this.mode === 'weapon' && this.holdNdc && this.pointers.size > 0) this.tryFire(this.holdNdc);
+    else if (this.mode === 'weapon' && this.padFire) this.tryFire({ x: 0, y: 0 });
     this.updateRockets(dt);
     this.updateFireballs(dt);
     this.updateNuke(dt);
