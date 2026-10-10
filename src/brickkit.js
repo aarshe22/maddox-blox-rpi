@@ -10,8 +10,56 @@ export const CO = new THREE.ConeGeometry(1, 1, 5);
 export const RAINBOW = [0xff4d6d, 0xff9f1c, 0xffd23f, 0x43d46c, 0x35a7ff, 0x9b5de5];
 export const GOAL = 24;
 
+/* Unlit materials. One shared tint per weather bucket — no per-pixel light,
+   normal projection, or reflection. Night is a single shade. */
+const FLAT_SHADES = {
+  day: 0xffffff,
+  warm: 0xf0c49a,
+  storm: 0xa7b3bf,
+  night: 0x4a5884,
+};
+const WEATHER_SHADE = {
+  clear: 'day', morning: 'day', noon: 'day',
+  evening: 'warm', quake: 'warm', meteor: 'warm', nuke: 'warm',
+  rain: 'storm', snow: 'storm', thunder: 'storm', tornado: 'storm', hurricane: 'storm', tsunami: 'storm',
+  night: 'night',
+};
+const _tint = new THREE.Color(FLAT_SHADES.day);
+const _tmp = new THREE.Color();
+
 export function mkMat(color, extra) {
-  return new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.55, metalness: 0.02 }, extra));
+  const base = new THREE.Color(color);
+  if (extra && extra.emissive != null) {
+    const k = Math.min(1, Number(extra.emissiveIntensity) || 0);
+    if (k > 0) base.lerp(new THREE.Color(extra.emissive), k);
+  }
+  const params = {};
+  if (extra) {
+    for (const key of ['transparent', 'opacity', 'depthWrite', 'depthTest', 'side', 'map', 'alphaTest', 'blending', 'vertexColors', 'wireframe']) {
+      if (extra[key] !== undefined) params[key] = extra[key];
+    }
+  }
+  const m = new THREE.MeshBasicMaterial(params);
+  m.userData.base = base.getHex();
+  m.color.copy(base).multiply(_tint);
+  return m;
+}
+
+/* Recolor every flat material already in the scene. New materials pick up
+   the current tint inside mkMat. */
+export function applyFlatShade(root, weatherId) {
+  _tint.setHex(FLAT_SHADES[WEATHER_SHADE[weatherId] || 'day']);
+  const seen = new Set();
+  root.traverse((o) => {
+    const list = o.material == null ? null : (Array.isArray(o.material) ? o.material : [o.material]);
+    if (!list) return;
+    for (const m of list) {
+      if (!m || seen.has(m) || m.userData.base == null) continue;
+      seen.add(m);
+      _tmp.setHex(m.userData.base).multiply(_tint);
+      m.color.copy(_tmp);
+    }
+  });
 }
 
 export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -40,7 +88,6 @@ export function bake(m) {
 export function merged(list, mat) {
   if (!list.length) return new THREE.Mesh(new THREE.BufferGeometry(), mat);
   const geo = mergeGeometries(list.map(bake), false);
-  geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = false;
   mesh.receiveShadow = false;
@@ -128,7 +175,6 @@ function brickGeometry(color, studs) {
     parts.push(addCyl([], 0.17, 0.14, sx, 1.07, sz));
   }
   g = mergeGeometries(parts.map(bake), false);
-  g.computeVertexNormals();
   g.userData.shared = true;
   studGeoCache.set(key, g);
   return g;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, brickPile, BRICK_PILE_CAP } from './brickkit.js';
+import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
 import { buildOptionsPanel, loadOptions, saveOptions, sizePreset } from './options.js';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
@@ -362,7 +362,6 @@ class World {
       const list = [];
       for (const [sx, sz] of studs) addCyl(list, 0.19, 0.17, sx, topY + 0.085, sz);
       const geo = mergeGeometries(list.map(bake), false);
-      geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, this.mat(color));
       mesh.castShadow = false;
       this._studs.set(key, mesh);
@@ -433,71 +432,69 @@ class World {
     return m;
   }
 
-  /* Deterministic rand for this prop's rubble, so the same destruction replays
-     identically after a reload. */
-  rubbleRand(p) {
-    return rndFrom(hash32(`${this.opts.size}:${this.genSalt}:${p.id}:${p.kind}:${Math.round(p.cx)}:${Math.round(p.cz)}`));
-  }
-
   propBaseY(p) {
     const box = this.propBox(p);
     return Number.isFinite(box?.min.y) ? Math.max(0, box.min.y) : 0;
   }
 
-  /* Replace the prop's rubble pile with one of `count` bricks (colors from the
-     census). brickPile() quantizes anything over BRICK_PILE_CAP down to 256. */
-  setRubble(p, count) {
-    count = Math.min(count, BRICK_PILE_CAP);
-    if (p.rubbleCount === count) return p.rubble;
-    p.rubbleCount = count;
-    if (p.rubble) {
-      p.rubble.userData.dispose?.();
-      p.rubble.removeFromParent();
-      p.rubble = null;
-    }
-    for (const r of p.rubbleSolids || []) r.disabled = true;
-    p.rubbleSolids = [];
-    if (count <= 0 || !(p.census?.total > 0)) return null;
-    const box = this.propBox(p);
-    const baseY = Number.isFinite(box?.min.y) ? Math.max(0, box.min.y) : 0;
-    const span = Number.isFinite(box?.max.x) ? Math.max(box.max.x - box.min.x, box.max.z - box.min.z) : 4;
-    // bricks land in world space around the prop's own footprint; big objects
-    // scatter wide so the capped pile reads as a field, not a heap
-    const pile = brickPile(count, p.census, this.rubbleRand(p), {
-      baseY, cx: p.cx, cz: p.cz, spread: clamp(span * 0.35, 2.2, 12)
-    });
-    pile.name = 'rubble';
-    p.rubble = this.addObj(pile);
-    p.extra.push(pile);
-    // Rubble is climbable/debris-solid: one collider per occupied lattice
-    // cell (instanced bricks + per-cell merge keeps count bounded). noRay so
-    // the pick tools ignore it, noSupport so players can't build on debris.
-    const cells = new Map();
-    pile.traverse((o) => {
-      if (!o.isInstancedMesh) return;
-      const m = new THREE.Matrix4();
-      for (let i = 0; i < o.count; i++) {
-        o.getMatrixAt(i, m);
-        const x = m.elements[12], y = m.elements[13], z = m.elements[14];
-        const key = `${Math.round(x)}|${Math.round(z)}`;
-        const top = y + 0.5;
-        const c = cells.get(key);
-        if (c) c.top = Math.max(c.top, top);
-        else cells.set(key, { x, z, top });
-      }
-    });
-    for (const c of cells.values()) {
-      const h = Math.max(0.3, c.top - baseY);
-      p.rubbleSolids.push(this.addSolid(new THREE.Box3(
-        new THREE.Vector3(c.x - 0.65, baseY, c.z - 0.65),
-        new THREE.Vector3(c.x + 0.65, baseY + h, c.z + 0.65)
-      ), null, true, true));
-    }
-    return p.rubble;
+  /* One shared sheet of flat black marks. Destroyed props add an instance;
+     nothing is collided with or updated after that. */
+  ensureScorch() {
+    if (this.scorch) return this.scorch;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    const mat = mkMat(0x141414);
+    mat.polygonOffset = true;
+    mat.polygonOffsetFactor = -2;
+    mat.polygonOffsetUnits = -2;
+    const mesh = new THREE.InstancedMesh(geo, mat, 48);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    this.addObj(mesh);
+    this.scorch = mesh;
+    this._scorchM = new THREE.Matrix4();
+    this._scorchV = new THREE.Vector3();
+    this._scorchQ = new THREE.Quaternion();
+    this._scorchS = new THREE.Vector3();
+    return mesh;
   }
 
-  /* Apply the visual state for a damage stage: darken what is left, shed whole
-     parts from the top down, and grow the loose-brick pile as it degrades. */
+  markScorch(p) {
+    if (p._scorched) return;
+    let mesh = this.ensureScorch();
+    if (mesh.count >= mesh.instanceMatrix.count) {
+      const bigger = new THREE.InstancedMesh(mesh.geometry, mesh.material, mesh.instanceMatrix.count * 2);
+      bigger.count = mesh.count;
+      bigger.frustumCulled = false;
+      bigger.castShadow = false;
+      bigger.receiveShadow = false;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, this._scorchM);
+        bigger.setMatrixAt(i, this._scorchM);
+      }
+      mesh.removeFromParent();
+      this.addObj(bigger);
+      this.scorch = bigger;
+      mesh = bigger;
+    }
+    const box = this.propBox(p);
+    const w = Math.max(1.4, box.max.x - box.min.x);
+    const d = Math.max(1.4, box.max.z - box.min.z);
+    this._scorchM.compose(
+      this._scorchV.set(p.cx, 0.04, p.cz),
+      this._scorchQ,
+      this._scorchS.set(w, 1, d)
+    );
+    mesh.setMatrixAt(mesh.count, this._scorchM);
+    mesh.count += 1;
+    mesh.instanceMatrix.needsUpdate = true;
+    p._scorched = true;
+  }
+
+  /* Apply the visual state for a damage stage: darken what is left and shed
+     parts from the top down. A full destroy leaves one flat black ground mark. */
   setStage(p, stage) {
     if (p.stage === stage) return;
     p.stage = stage;
@@ -512,16 +509,7 @@ class World {
         pt.mesh.material = this.wornMat(pt.hex, stage);
       }
     }
-    // partial pile: same colors, a growing share of the final brick count
-    const frac = stage >= 4 ? 1 : [0, 0.12, 0.28, 0.55][stage];
-    // brickCount can move after staging (the monument's mosaic attaches async),
-    // so re-derive the pile whenever the target count changed, not just stage
-    this.setRubble(p, Math.round(p.brickCount * frac));
-    if (p.kind === 'tree' && stage >= 4) {
-      const stump = merged([addCyl([], 0.3, 0.4, p.cx, 0.2, p.cz)], this.mat(0x8b5a2b));
-      this.addObj(stump);
-      p.extra.push(stump);
-    }
+    if (stage >= 4) this.markScorch(p);
   }
 
   applyHit(p, amount, pt) {
@@ -531,7 +519,7 @@ class World {
     if (stage >= 4) {
       p.gone = true;
       for (const q of p.parts) this.hidePart(q);
-      this.setStage(p, 4);   // full rubble pile, same brick amount + colors
+      this.setStage(p, 4);
     } else {
       this.setStage(p, stage);
     }
@@ -1738,16 +1726,8 @@ class World {
       if (mp) {
         mp.parts.push({ mesh });
         if (mp.gone) mesh.visible = false;
-        // the mosaic bricks are part of the object now: re-census so its rubble
-        // pile carries the monument's own 57,600 brick colors, and rebuild a
-        // pile that staged damage replayed earlier from the wall-only census
         mp.census = brickCensus(mp.parts.map((pt) => pt.mesh));
         mp.brickCount = clamp(Math.round(mp.census.total), 1, BRICK_PILE_CAP);
-        if (mp.rubble) {
-          const want = mp.rubbleCount;
-          mp.rubbleCount = -1;
-          this.setRubble(mp, want);
-        }
       }
       mon.mesh = mesh;
     } catch (e) {
@@ -2591,14 +2571,6 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1800);
     this.orbit = { yaw: Math.PI, pitch: 0.42, dist: 11, wantDist: 11 };
 
-    this.hemi = new THREE.HemisphereLight(0xd8f0ff, 0x5f8f3f, 1.0);
-    this.scene.add(this.hemi);
-    const sun = new THREE.DirectionalLight(0xfff2d6, 2.2);
-    sun.position.set(26, 40, 18);
-    sun.castShadow = false;
-    this.scene.add(sun, sun.target);
-    this.sun = sun;
-
     this.world = new World(this.scene);
     this.world.onWorldChanged = () => {
       this.applyOutdoorFog();
@@ -2744,9 +2716,7 @@ class Game {
     const r = SKY[this.weather] || SKY.clear;
     this.scene.fog = new THREE.Fog(r.fog, Math.max(80, H * (this.weather === 'clear' || this.weather === 'noon' ? 1.8 : 1.1)), Math.max(180, H * 4.5));
     this.scene.background = this.skyTexFor(r);
-    this.sun.intensity = r.sun;
-    this.sun.color.setHex(r.sunCol);
-    this.hemi.intensity = r.hemi;
+    applyFlatShade(this.scene, this.weather);
     this.stars.set(r.star);
   }
 
@@ -3199,8 +3169,8 @@ class Game {
     if (def.kind === 'stream') {
       if (!this.fireballs) this.fireballs = [];
       sfx.fireTick();
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
-        new THREE.MeshStandardMaterial({ color: 0xff8c1a, emissive: 0xff5500, emissiveIntensity: 1.6 }));
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
+        mkMat(0xff8c1a, { emissive: 0xff5500, emissiveIntensity: 1 }));
       const muzzle = chest.clone().addScaledVector(aim, 0.75).add(new THREE.Vector3(0, 0.25, 0));
       ball.position.copy(muzzle);
       this.scene.add(ball);

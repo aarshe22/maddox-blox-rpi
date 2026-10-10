@@ -8,6 +8,7 @@
    offline instead of sampled back out of a canvas. No resizing, interpolation,
    dithering, or reinterpretation in either path. */
 import * as THREE from 'three';
+import { mkMat } from './brickkit.js';
 import { FACE8_PALETTE, face8Raster } from './face8.js';
 
 export { FACE8_PALETTE, face8Raster };
@@ -147,9 +148,7 @@ export function instancedMosaicMesh(m, size, flipX = false, palette = FACE8_PALE
   for (let ci = 0; ci < palette.length; ci++) {
     const list = perColor[ci];
     if (!list.length) continue;
-    const inst = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({
-      color: parseInt(palette[ci].slice(1), 16), roughness: 0.45, metalness: 0.02
-    }), list.length / 2);
+    const inst = new THREE.InstancedMesh(box, mkMat(parseInt(palette[ci].slice(1), 16)), list.length / 2);
     // 57,600 bricks as a shallow wall relief: receive shadows yes, cast no —
     // the 0.26-unit protrusion casts nothing worth a doubled shadow pass
     inst.castShadow = false;
