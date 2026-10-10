@@ -55,6 +55,26 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js"></script>
+<script>
+/* Modules cannot load from a file:// page. Explain that instead of failing in the console. */
+(function () {
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var card = document.querySelector('#intro .card');
+      if (!card) return;
+      card.innerHTML = '<h1>Maddox Blox</h1>'
+        + '<p>The browser blocked the game because this page was opened as a file.</p>'
+        + '<p>In this folder, run:</p>'
+        + '<pre style="text-align:left">npm install\nnpm start</pre>'
+        + '<p>Then open <b>http://127.0.0.1:8016/</b></p>';
+    });
+    return;
+  }
+  var s = document.createElement('script');
+  s.type = 'module';
+  s.src = 'src/main.js';
+  document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>
