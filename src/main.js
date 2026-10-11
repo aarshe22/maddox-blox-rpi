@@ -4970,7 +4970,7 @@ class Game {
     }
     this.hair = { t: 0, hosts };
     sfx.chime();
-    this.toast(`Hair — ${n} inhabitants sprouted a beard. It grows every 12 seconds and follows their steps.`, 'good');
+    this.toast(`Hair — ${n} inhabitants sprouted a beard. It stretches every 2 seconds and follows their steps.`, 'good');
   }
 
   clearHairTrail() {
@@ -5134,8 +5134,8 @@ class Game {
     if (!this.hair) return;
     this.hair.t += dt;
     let guard = 0;
-    while (this.hair.t >= 12 && guard < 8) {
-      this.hair.t -= 12;
+    while (this.hair.t >= 2 && guard < 8) {
+      this.hair.t -= 2;
       guard++;
       const hosts = this.collectHairHosts();
       this.hair.hosts = hosts;
