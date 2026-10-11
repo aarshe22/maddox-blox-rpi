@@ -4702,7 +4702,12 @@ class Game {
     window.addEventListener('keyup', (e) => { if (map[e.code]) this.keys.delete(map[e.code]); });
     window.addEventListener('blur', () => this.keys.clear());
     window.addEventListener('resize', () => { this.resize(); this.layoutStrips?.(); });
-    if (matchMedia('(hover: none)').matches) document.body.classList.add('touch');
+    if (document.documentElement.classList.contains('touch')
+      || matchMedia('(hover: none), (pointer: coarse)').matches
+      || navigator.maxTouchPoints > 0) {
+      document.documentElement.classList.add('touch');
+      document.body.classList.add('touch');
+    }
 
     const c = this.canvas;
     this.pointers = new Map();
@@ -4767,16 +4772,22 @@ class Game {
     this.enterBtn = document.createElement('button');
     this.enterBtn.id = 'btn-enter';
     this.enterBtn.textContent = 'ENTER';
-    this.weaponBtn = document.createElement('button');
-    this.weaponBtn.id = 'btn-weapon';
-    this.weaponBtn.type = 'button';
-    this.weaponBtn.textContent = '⚔️';
-    this.weaponBtn.setAttribute('aria-label', 'Weapons');
-    this.weatherBtn = document.createElement('button');
-    this.weatherBtn.id = 'btn-weather';
-    this.weatherBtn.type = 'button';
-    this.weatherBtn.textContent = '🌦️';
-    this.weatherBtn.setAttribute('aria-label', 'Weather');
+    this.weaponBtn = document.getElementById('btn-weapon');
+    this.weatherBtn = document.getElementById('btn-weather');
+    if (!this.weaponBtn) {
+      this.weaponBtn = document.createElement('button');
+      this.weaponBtn.id = 'btn-weapon';
+      this.weaponBtn.type = 'button';
+      this.weaponBtn.innerHTML = '⚔️<br>Weapons';
+      this.weaponBtn.setAttribute('aria-label', 'Weapons');
+    }
+    if (!this.weatherBtn) {
+      this.weatherBtn = document.createElement('button');
+      this.weatherBtn.id = 'btn-weather';
+      this.weatherBtn.type = 'button';
+      this.weatherBtn.innerHTML = '🌦️<br>Weather';
+      this.weatherBtn.setAttribute('aria-label', 'Weather');
+    }
     hud.append(this.joy, this.jumpBtn, this.weaponBtn, this.weatherBtn, this.enterBtn);
     const tapBtn = (el, fn) => {
       let fromTouch = false;

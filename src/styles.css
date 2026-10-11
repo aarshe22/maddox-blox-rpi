@@ -266,10 +266,15 @@ body.touch #btn-jump { display: block; }
   width: 84px; height: 84px;
   border-radius: 50%;
   border: 3px solid rgba(255,255,255,.7);
-  font-size: 28px;
-  line-height: 1;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.05;
   display: none;
   pointer-events: auto;
+  z-index: 6;
+  -webkit-appearance: none;
+  appearance: none;
 }
 #btn-weapon {
   bottom: 194px;
@@ -282,6 +287,7 @@ body.touch #btn-jump { display: block; }
 #btn-weapon.on, #btn-weather.on {
   outline: 4px solid #fff;
 }
+html.touch #btn-weapon, html.touch #btn-weather,
 body.touch #btn-weapon, body.touch #btn-weather { display: block; }
 
 #btn-enter {
