@@ -49,8 +49,8 @@ export function defaultOptions() {
     enabled,
     sound: true,
     debug: false,
-    life: { animals: true, birds: true, balloons: false },
-    lifeRev: 1
+    life: { animals: true, birds: false, balloons: false },
+    lifeRev: 2
   };
 }
 
@@ -62,12 +62,11 @@ export function loadOptions() {
     if (SIZES.some((s) => s.id === raw.size)) o.size = raw.size;
     if (typeof raw.sound === 'boolean') o.sound = raw.sound;
     if (typeof raw.debug === 'boolean') o.debug = raw.debug;
-    const keepLife = raw.lifeRev === 1;
+    const keepLife = raw.lifeRev === 2;
     if (raw.life && typeof raw.life === 'object') {
       for (const k of ['animals', 'birds', 'balloons']) {
-        if (k === 'balloons' || keepLife) {
-          if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
-        }
+        if (k === 'birds' && !keepLife) continue;
+        if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
       }
     }
     for (const t of OBJECT_TYPES) {
@@ -95,6 +94,10 @@ export function buildOptionsPanel(opts, hooks = {}) {
       <div class="o-seg">${SIZES.map((s) => `<button data-size="${s.id}">${s.label}</button>`).join('')}</div>
       <label class="o-sec">Objects — count &amp; on/off</label>
       <div class="o-rows"></div>
+      <label class="o-sec">Birds</label>
+      <div class="o-row o-toggles">
+        <button class="o-toggle o-birds" title="Birds are off until you turn them on. Applies when the world regenerates."></button>
+      </div>
       <label class="o-sec">Sound &amp; voice</label>
       <div class="o-row o-toggles">
         <button class="o-toggle o-snd" title="Read aloud weapon, block and weather selections; click to mute everything"></button>
@@ -149,6 +152,20 @@ export function buildOptionsPanel(opts, hooks = {}) {
 
   /* Sound/voice + fall-debug toggles take effect immediately (no regen), and
      persist with the rest of the options. */
+  const birdsBtn = el.querySelector('.o-birds');
+  const syncBirds = () => {
+    const on = !!opts.life.birds;
+    birdsBtn.classList.toggle('on', on);
+    birdsBtn.textContent = on ? '🐦 Birds: on' : '🐦 Birds: off';
+  };
+  birdsBtn.addEventListener('click', () => {
+    if (!opts.life) opts.life = { animals: true, birds: false, balloons: false };
+    opts.life.birds = !opts.life.birds;
+    syncBirds();
+    saveOptions(opts);
+  });
+  syncBirds();
+
   const sndBtn = el.querySelector('.o-snd');
   const dbgBtn = el.querySelector('.o-dbg');
   const copyBtn = el.querySelector('.o-copy');
@@ -196,7 +213,7 @@ export function buildOptionsPanel(opts, hooks = {}) {
       saveOptions(opts);
     },
     toggle() { if (api.isOpen) api.close(); else api.open(); },
-    refresh() { syncSegs(); for (const s of syncers) s(); syncSound(); syncDebug(); },
+    refresh() { syncSegs(); for (const s of syncers) s(); syncBirds(); syncSound(); syncDebug(); },
     syncDebug() { syncDebug(); }
   };
 
