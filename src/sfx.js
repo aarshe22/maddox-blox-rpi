@@ -1,10 +1,15 @@
 /* Synthesized sound kit (WebAudio, zero assets): one-shots + named loops. */
 
 class Sfx {
-  constructor() { this.ac = null; this.master = null; this._loops = new Map(); this._flame = null; }
+  constructor() {
+    this.ac = null; this.master = null; this._loops = new Map(); this._flame = null;
+    this._crickets = null; this._cricketWanted = false;
+  }
   setMuted(m) {
     this.muted = !!m;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.5;
+    if (this.muted) this._haltCrickets();
+    else if (this._cricketWanted) this._startCrickets();
   }
   ensure() {
     if (!this.ac) {
@@ -52,6 +57,7 @@ class Sfx {
   /* ---------------- one-shots ---------------- */
   place()    { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.07, 0.22, 'square', 620, 900); this._noise(t, 0.05, 0.1, 2500, 900, 'highpass'); } }
   swap()     { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.06, 0.2, 'square', 700, 1200); this._tone(t + 0.05, 0.06, 0.16, 'square', 900, 1500); } }
+  chime()    { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.07, 0.16, 'square', 880, 1320); this._tone(t + 0.06, 0.08, 0.14, 'square', 1320, 1760); } }
   sword()    { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.16, 0.5, 3800, 600, 'bandpass', 2); } }
   hammer()   { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.14, 0.6, 'square', 320, 70); this._noise(t, 0.2, 0.7, 1500, 200); } }
   fireTick() { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.09, 0.12, 900, 300); } }
@@ -164,6 +170,71 @@ class Sfx {
       g.gain.linearRampToValueAtTime(0.0001, t + 0.18);
       src.stop(t + 0.25); lfo.stop(t + 0.25);
     }
+  }
+  /* Night cricket bed: a few soft oscillator chirps, irregular and overlapping.
+     Separate from weather noise loops so unloopAll() does not have to know about it. */
+  setCrickets(on) {
+    this._cricketWanted = !!on;
+    if (this._cricketWanted && !this.muted) this._startCrickets();
+    else this._haltCrickets();
+  }
+  _startCrickets() {
+    if (this._crickets || !this._cricketWanted || this.muted) return;
+    if (!this.ensure()) return;
+    const bus = this.ac.createGain();
+    bus.gain.value = 0.62;
+    bus.connect(this.master);
+    const voices = [
+      { hz: 3920, gap: [0.32, 0.95], pulses: [4, 6], peak: 0.07, timer: 0 },
+      { hz: 4580, gap: [0.48, 1.45], pulses: [3, 5], peak: 0.05, timer: 0 },
+      { hz: 5140, gap: [0.7, 1.9], pulses: [2, 4], peak: 0.034, timer: 0 }
+    ];
+    const bed = { bus, voices, chirps: 0, gen: 1 };
+    this._crickets = bed;
+    voices.forEach((v, i) => this._armCricket(v, bed.gen, 40 + i * 260));
+  }
+  _armCricket(v, gen, delayMs) {
+    v.timer = setTimeout(() => this._chirp(v, gen), delayMs);
+  }
+  _chirp(v, gen) {
+    const bed = this._crickets;
+    if (!bed || bed.gen !== gen || this.muted || !this.ac) return;
+    const t = this.ac.currentTime + 0.02;
+    const n = v.pulses[0] + Math.floor(Math.random() * (v.pulses[1] - v.pulses[0] + 1));
+    const step = 0.036 + Math.random() * 0.016;
+    for (let i = 0; i < n; i++) {
+      const t0 = t + i * step;
+      const dur = 0.02 + Math.random() * 0.012;
+      const f0 = v.hz * (0.982 + Math.random() * 0.036);
+      const f1 = f0 * (1.045 + Math.random() * 0.06);
+      const o = this.ac.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(Math.max(20, f0), t0);
+      o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
+      const g = this.ac.createGain();
+      const peak = v.peak * (0.82 + Math.random() * 0.28);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(peak, t0 + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(bed.bus);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    }
+    bed.chirps++;
+    const rest = v.gap[0] + Math.random() * (v.gap[1] - v.gap[0]);
+    this._armCricket(v, gen, (n * step + rest) * 1000);
+  }
+  _haltCrickets() {
+    const bed = this._crickets;
+    if (!bed) return;
+    bed.gen++;
+    this._crickets = null;
+    for (const v of bed.voices) clearTimeout(v.timer);
+    if (!this.ac) return;
+    const t = this.ac.currentTime;
+    bed.bus.gain.cancelScheduledValues(t);
+    bed.bus.gain.setValueAtTime(Math.max(0.0001, bed.bus.gain.value), t);
+    bed.bus.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+    setTimeout(() => { try { bed.bus.disconnect(); } catch (e) {} }, 140);
   }
 }
 

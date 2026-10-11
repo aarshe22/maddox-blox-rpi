@@ -812,7 +812,8 @@ export class Life {
         m.position.x = c.home.x + Math.cos(a) * R;
         m.position.z = c.home.z + Math.sin(a) * R;
         m.position.y = 5 + Math.sin(c.t * 1.4) * 1.5;
-        m.rotation.y = -a;
+        // Circle tangent is (-sin a, cos a). atan2(-dx, -dz) = π − a aims local −Z (the beak) along it.
+        m.rotation.y = Math.PI - a;
         const flap = Math.sin(c.t * 13) * 0.8;
         m.userData.wings[0].rotation.z = flap;
         m.userData.wings[1].rotation.z = -flap;

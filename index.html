@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
-<link rel="stylesheet" href="src/styles.css?v=11" />
+<link rel="stylesheet" href="src/styles.css?v=14" />
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -65,6 +65,15 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
       <div class="row" id="hud-need">Collect 30 more to fix the rainbow bridge</div>
     </div>
     <button id="goal-mark" type="button" aria-label="Show brick count">?</button>
+  </div>
+  <div id="panel-flight" class="panel" hidden style="top:14px;right:14px;left:auto;min-width:150px">
+    <div class="title">Golden rings</div>
+    <div class="row"><b id="hud-rings">0</b>&nbsp;/ 10</div>
+  </div>
+  <div id="panel-bonus" class="panel" hidden style="top:14px;right:14px;left:auto;min-width:210px">
+    <div class="title">Bonus level</div>
+    <div class="row"><b id="hud-bonus-time">30</b>s left</div>
+    <div class="row"><b id="hud-bonus-score">0</b>&nbsp;<span id="hud-bonus-detail">coins, gems, gifts</span></div>
   </div>
 
   <div id="hotbar"></div>
@@ -136,7 +145,7 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
     document.head.appendChild(map);
     var app = document.createElement('script');
     app.type = 'module';
-    app.src = 'src/main.js?v=12';
+    app.src = 'src/main.js?v=30';
     document.body.appendChild(app);
   }
   async function localThreeExists() {

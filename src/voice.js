@@ -21,7 +21,7 @@ class Voice {
     try {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.15; u.pitch = 1.05; u.volume = 0.9;
+      u.rate = 0.8625; u.pitch = 1.05; u.volume = 0.9;
       window.speechSynthesis.speak(u);
     } catch (e) { /* speech unavailable: ignore */ }
   }

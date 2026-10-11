@@ -2,15 +2,24 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=11';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=12';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
-import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js?v=12';
-import { sfx } from './sfx.js?v=12';
-import { voice } from './voice.js';
-import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js';
+import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js?v=14';
+import { sfx } from './sfx.js?v=14';
+import { voice } from './voice.js?v=1';
+import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=1';
 import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js';
 import { sigOf, getState, setState, clearState } from './persist.js';
+
+/* Propeller course: hole is wider than the body, centered on the cruise chest. */
+/* 500% larger than normal: 100% + 500% = 6×. Weapons and shots use the same factor. */
+const GIANT_SCALE = 6;
+const RING_NEED = 10;
+const RING_HOLE = 2.65;
+const RING_TUBE = 0.22;
+const RING_RADIUS = RING_HOLE + RING_TUBE;
+const BONUS_TIME = 30;
 
 /* Mutually exclusive control modes; exactly one strip is ever visible. */
 export const MODES = [
@@ -108,6 +117,8 @@ const STRIP_PICS = {
   meteor: stripPic('<path d="M8 20c10 2 16 8 18 18" stroke="#ff7a18" stroke-width="6" stroke-linecap="round"/><circle cx="40" cy="40" r="14" fill="#c94f06" stroke="#243044" stroke-width="3"/><circle cx="34" cy="34" r="4" fill="#ffd23f"/>'),
   nuke: stripPic('<circle cx="32" cy="32" r="22" fill="#ffe14a" stroke="#243044" stroke-width="3"/><circle cx="32" cy="32" r="6" fill="#243044"/><path d="M32 10a8 8 0 0 1 0 14M18 42a8 8 0 0 1 12-8M46 42a8 8 0 0 0-12-8" fill="#243044"/>'),
   prop: stripPic('<circle cx="32" cy="42" r="13" fill="#ffcc66" stroke="#243044" stroke-width="3"/><path d="M16 40h32v5H16z" fill="#d23b2f" stroke="#243044" stroke-width="2"/><rect x="29" y="22" width="6" height="10" rx="1" fill="#22252b"/><path d="M8 20h48M32 8v24" stroke="#e8eef5" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="20" r="3.2" fill="#f4c430" stroke="#243044" stroke-width="2"/>'),
+  godzilla: stripPic('<ellipse cx="32" cy="42" rx="13" ry="14" fill="#3f8f3a" stroke="#243044" stroke-width="3"/><circle cx="32" cy="20" r="11" fill="#57b34a" stroke="#243044" stroke-width="3"/><circle cx="28" cy="18" r="2" fill="#fff"/><circle cx="37" cy="18" r="2" fill="#fff"/><path d="M12 34l-8 8M52 34l8 8M24 54l-4 8M40 54l4 8" stroke="#2f6b2c" stroke-width="5" stroke-linecap="round"/><path d="M26 24h12" stroke="#1a1208" stroke-width="2" stroke-linecap="round"/>'),
+  hair: stripPic('<circle cx="32" cy="26" r="16" fill="#ffcc99" stroke="#243044" stroke-width="3"/><circle cx="26" cy="23" r="2" fill="#243044"/><circle cx="38" cy="23" r="2" fill="#243044"/><path d="M12 34c5 3 9 5 14 1 3 5 9 5 12 1 5 4 9 2 14-1-3 8-10 9-14 6-4 3-11 2-12-6z" fill="#4a2c18" stroke="#243044" stroke-width="2"/><path d="M26 42h12v5c0 9-12 11-12 2z" fill="#4a2c18" stroke="#243044" stroke-width="2"/>'),
   explore: stripPic('<circle cx="32" cy="32" r="22" fill="#fff" stroke="#243044" stroke-width="3"/><path d="M32 14l6 16-16 6z" fill="#e23b2f"/><path d="M32 50l-6-16 16-6z" fill="#243044"/>')
 };
 export function stripPicture(id) {
@@ -1833,7 +1844,8 @@ class World {
     const glow = new THREE.PointLight(0xff7b2e, 1.6, 10 * k, 2);
     glow.position.set(cx + 0.5, y + 0.8, cz + 0.5);
     this.addObj(glow);
-    this.registerProp('volcano', cx, cz, 700, vparts);
+    const prop = this.registerProp('volcano', cx, cz, 700, vparts);
+    prop.mouthY = y + 0.62;
     this.obstacles.push({ x: cx, z: cz, w: 4 * k, d: 4 * k });
   }
 
@@ -2399,6 +2411,8 @@ class Player {
     this.grounded = true;
     this.flying = false;
     this.liftT = 0;
+    this.bonusRun = false;
+    this.giant = false;
 
     const skin = mkMat(0xffcc66);
     const shirt = mkMat(0xe8402a);
@@ -2456,6 +2470,27 @@ class Player {
       this.legs.push(leg);
     }
     this.root = g;
+    this.captureLook();
+  }
+
+  /* Snowflake and water drop swap these materials for ice or gel.
+     The body is not rebuilt with the world, so keep the originals. */
+  captureLook() {
+    this.look = [];
+    this.root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      this.look.push({ mesh: o, material: o.material, renderOrder: o.renderOrder });
+    });
+  }
+
+  restoreLook() {
+    if (!this.look) return;
+    for (const rec of this.look) {
+      const cur = rec.mesh.material;
+      if (cur && cur !== rec.material) cur.dispose();
+      rec.mesh.material = rec.material;
+      rec.mesh.renderOrder = rec.renderOrder;
+    }
   }
 
   makePropHat() {
@@ -2498,6 +2533,14 @@ class Player {
     if (this.propHat) this.propHat.visible = !!on;
   }
 
+  /* Body, hit capsule, and held gear share one scale. The rig is a child of root. */
+  applyBodyScale() {
+    const s = this.giant && !this.bonusRun ? GIANT_SCALE : 1;
+    this.root.scale.setScalar(s);
+    this.radius = 0.4 * s;
+    this.height = 1.85 * s;
+  }
+
   groundTopAt(x, z, feet) {
     const box = new THREE.Box3(
       new THREE.Vector3(x - this.radius, feet - 0.12, z - this.radius),
@@ -2529,6 +2572,10 @@ class Player {
   }
 
   update(dt, move, jump) {
+    if (this.bonusRun) {
+      this.runBonus(dt, move, jump);
+      return;
+    }
     if (this.flying && this.world.floodY == null) {
       this.fly(dt, move, jump);
       return;
@@ -2542,7 +2589,7 @@ class Player {
       this.swim(dt, move);
       return;
     }
-    const speed = 6.4;
+    const speed = this.giant ? 11 : 6.4;
     this.vel.x += (move.x * speed - this.vel.x) * Math.min(1, dt * 12);
     this.vel.z += (move.z * speed - this.vel.z) * Math.min(1, dt * 12);
     this.vel.y -= 26 * dt;
@@ -2562,13 +2609,13 @@ class Player {
       this.coyote = Math.max(0, this.coyote - dt);
     }
     if (jump && (this.grounded || this.coyote > 0)) {
-      this.vel.y = 9.6;
+      this.vel.y = this.giant ? 13 : 9.6;
       this.coyote = 0;
       if (navigator.vibrate) navigator.vibrate(8);
     }
 
     const horiz = Math.hypot(this.vel.x, this.vel.z);
-    const stepH = (this.grounded || this.coyote > 0) ? 1.05 : 0;
+    const stepH = (this.grounded || this.coyote > 0) ? (this.giant ? 2.4 : 1.05) : 0;
     const feet = this.pos.y + Math.max(0, this.vel.y * dt);
     const head = feet + this.height;
     const nx = this.pos.x + this.vel.x * dt;
@@ -2618,6 +2665,50 @@ class Player {
     const bob = Math.abs(s) * 0.09;
 
     this.root.position.set(this.pos.x, this.pos.y + bob, this.pos.z);
+    if (horiz > 0.6) {
+      const want = Math.atan2(-this.vel.x, -this.vel.z);
+      let d = want - this.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.yaw += d * Math.min(1, dt * 11);
+    }
+    this.root.rotation.x = 0;
+    this.root.rotation.y = this.yaw;
+  }
+
+  /* Flat bonus field. The real world solids stay put, hidden, until the round ends. */
+  runBonus(dt, move, jump) {
+    const speed = 6.4;
+    const half = 25;
+    this.vel.x += (move.x * speed - this.vel.x) * Math.min(1, dt * 12);
+    this.vel.z += (move.z * speed - this.vel.z) * Math.min(1, dt * 12);
+    this.vel.y -= 26 * dt;
+    this.vel.y = Math.max(this.vel.y, -18);
+    if (this.pos.y <= 0 && this.vel.y <= 0) {
+      this.pos.y = 0;
+      this.vel.y = 0;
+      this.grounded = true;
+      this.coyote = 0.12;
+    } else {
+      this.grounded = false;
+      this.coyote = Math.max(0, this.coyote - dt);
+    }
+    if (jump && (this.grounded || this.coyote > 0)) {
+      this.vel.y = 9.6;
+      this.coyote = 0;
+    }
+    this.pos.x = clamp(this.pos.x + this.vel.x * dt, -half, half);
+    this.pos.z = clamp(this.pos.z + this.vel.z * dt, -half, half);
+    this.pos.y += this.vel.y * dt;
+    if (this.pos.y < 0) { this.pos.y = 0; this.vel.y = 0; this.grounded = true; }
+    const horiz = Math.hypot(this.vel.x, this.vel.z);
+    this.phase += dt * (2 + horiz * 1.5);
+    const s = Math.sin(this.phase * 3.2) * Math.min(0.9, horiz * 0.16);
+    this.legs[0].rotation.x = s;
+    this.legs[1].rotation.x = -s;
+    this.arms[0].rotation.x = -s * 0.8;
+    this.arms[1].rotation.x = s * 0.8;
+    this.root.position.set(this.pos.x, this.pos.y + Math.abs(s) * 0.09, this.pos.z);
     if (horiz > 0.6) {
       const want = Math.atan2(-this.vel.x, -this.vel.z);
       let d = want - this.yaw;
@@ -2762,6 +2853,9 @@ class Game {
     this.time = 0;
     this.collected = 0;
     this.repaired = false;
+    this.rings = null;
+    this.ringScore = 0;
+    this.bonus = null;
     this.started = false;
     this.slot = 0;
     this.nuke = null;
@@ -2786,11 +2880,16 @@ class Game {
     this._shotPool = [];
     this._shotMats = new Map();
     this._shotN = 0;
+    this.eruptions = [];
+    this._eruptPool = [];
+    this._eruptMats = null;
+    this._eruptColor = new THREE.Color();
     this.quietFx = false;
     this.saucer = null;
     this.flood = null;
     this.chasm = null;
     this.frosted = false;
+    this.hair = null;
     this.fireballs = [];
     this.meteors = [];
     this._falling = [];
@@ -2845,7 +2944,10 @@ class Game {
     this.optionsEl.setAttribute('aria-label', 'World options');
     this.panel = buildOptionsPanel(this.world.opts, {
       onOpen: () => { this.keys.clear(); this.pointers.clear(); },
-      onRegen: () => this.regenerateWorld(),
+      onRegen: () => {
+        voice.speak('regenerating maddox blox!');
+        this.regenerateWorld();
+      },
       onSound: (v) => { sfx.setMuted(!v); voice.setEnabled(v); },
       onDebug: (v) => DBG.set(v),
       onResolution: () => this.resize(),
@@ -2862,7 +2964,8 @@ class Game {
 
     this.bindDom();
     this.bindStrips();
-    this.selectSlot(0);
+    this.selectSlot(0, false);
+    voice.speak('Welcome to Maddox Blox!');
     this.spawnCollectibles();
     this.bindInput();
     this.resize();
@@ -2996,6 +3099,12 @@ class Game {
   }
 
   bindDom() {
+    this.flightHud = document.getElementById('panel-flight');
+    this.ringEl = document.getElementById('hud-rings');
+    this.bonusHud = document.getElementById('panel-bonus');
+    this.bonusTimeEl = document.getElementById('hud-bonus-time');
+    this.bonusScoreEl = document.getElementById('hud-bonus-score');
+    this.bonusDetailEl = document.getElementById('hud-bonus-detail');
     const bar = document.getElementById('hotbar');
     this.slots = [];
     BRICKS.forEach((b, i) => {
@@ -3104,6 +3213,10 @@ class Game {
   }
 
   setMode(mode) {
+    if (this.bonus) {
+      if (mode !== 'explore') this.toast('Finish the bonus round first', 'good');
+      return;
+    }
     if (mode === this.mode) { this.refreshStrips(); return; }
     if (mode === 'weather') {
       this.mode = 'weather';
@@ -3158,9 +3271,12 @@ class Game {
       this.noneSlot.style.display = weapon ? '' : 'none';
       this.noneSlot.classList.toggle('active', weapon && weaponFocus === 0);
     }
+    const giantOn = !!(this.player && this.player.giant);
     this.weaponSlots.forEach((el, i) => {
       el.style.display = weapon ? '' : 'none';
-      el.classList.toggle('active', weapon && i + 1 === weaponFocus);
+      const godzillaTile = WEAPONS[i] && WEAPONS[i].kind === 'godzilla' && giantOn;
+      const hairTile = WEAPONS[i] && WEAPONS[i].kind === 'hair' && !!this.hair;
+      el.classList.toggle('active', weapon && (i + 1 === weaponFocus || godzillaTile || hairTile));
     });
     const weatherFocus = weather
       ? (this.stripFocus ?? (Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather)) + 1))
@@ -3177,7 +3293,9 @@ class Game {
     this.syncWeaponRig();
     this.ghost.visible = false;
     const heldName = this.equipped == null ? '' : ` · ${WEAPONS[this.equipped].name}`;
-    const label = this.mode === 'explore' ? `🧭 EXPLORE${heldName}`
+    const giantName = giantOn ? ' · Godzilla' : '';
+    const hairName = this.hair ? ' · Hair' : '';
+    const label = this.mode === 'explore' ? `🧭 EXPLORE${giantName}${hairName}${heldName}`
       : build ? '🧱 BUILD'
       : weapon ? `⚔️ WEAPON · ${weaponFocus > 0 ? WEAPONS[weaponFocus - 1].name : 'none'}`
       : `🌦️ WEATHER · ${this.weatherDef.name}`;
@@ -3192,7 +3310,93 @@ class Game {
   }
 
   /* Strip index 0 is the empty tile. UFO launches but is never kept. */
+  toggleGodzilla() {
+    if (!this.player || this.bonus) return;
+    const on = !this.player.giant;
+    if (on && this.world.inHouse) {
+      this.world.exitHouse();
+      this.applyOutdoorFog();
+    }
+    this.player.giant = on;
+    this.player.applyBodyScale();
+    if (on) {
+      this._zoomBeforeGiant = this.orbit.wantDist;
+      this.orbit.wantDist = Math.max(this.orbit.wantDist, 32);
+      sfx.thud();
+      this.toast('Godzilla — six times bigger. Stomp as you walk. Weapons grow with you.', 'good');
+    } else {
+      if (this._zoomBeforeGiant != null) this.orbit.wantDist = this._zoomBeforeGiant;
+      this._zoomBeforeGiant = null;
+      this.toast('Back to normal size', 'good');
+    }
+    this.refreshStrips();
+  }
+
+  stopGodzilla(opts = {}) {
+    if (!this.player || !this.player.giant) return;
+    this.player.giant = false;
+    this.player.applyBodyScale();
+    if (this._zoomBeforeGiant != null) this.orbit.wantDist = this._zoomBeforeGiant;
+    this._zoomBeforeGiant = null;
+    if (!opts.quiet) this.toast('Back to normal size', 'good');
+  }
+
+  /* Footprints crush props, creatures, and loose bricks while he is actually walking. */
+  stomp(dt) {
+    const p = this.player;
+    if (!p || !p.giant || p.bonusRun || p.flying) return;
+    if (Math.hypot(p.vel.x, p.vel.z) < 0.7) return;
+    this._stompT = (this._stompT || 0) - dt;
+    if (this._stompT > 0) return;
+    this._stompT = 0.28;
+    const radius = p.radius + 0.9;
+    const at = new THREE.Vector3(p.pos.x, p.pos.y + 0.5, p.pos.z);
+    let hit = false;
+    const bucket = this.world._b && this.world._b.group;
+    for (const prop of this.world.props) {
+      if (prop.gone) continue;
+      if (Math.hypot(prop.cx - p.pos.x, prop.cz - p.pos.z) > radius + 2.4) continue;
+      this.world.applyHit(prop, 70, at);
+      hit = true;
+      if (!prop.gone) continue;
+      const seen = new Set();
+      for (const pt of prop.parts) {
+        const parent = pt.mesh && pt.mesh.parent;
+        if (!parent || parent === bucket || parent === this.scene || seen.has(parent)) continue;
+        seen.add(parent);
+        parent.visible = false;
+      }
+    }
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || c.hp == null) continue;
+        if (Math.hypot(c.mesh.position.x - p.pos.x, c.mesh.position.z - p.pos.z) > radius + 1.2) continue;
+        this.life.hurt(c, 40);
+        hit = true;
+      }
+    }
+    this.bricksInRadius(at, radius, (rec) => { this.hurtBrick(rec, 40); hit = true; });
+    if (hit) {
+      sfx.thud();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }
+  }
+
+  playerScale() {
+    return this.player && this.player.giant && !this.player.bonusRun ? GIANT_SCALE : 1;
+  }
+
+  scaledWeapon(def, scale) {
+    if (!def || !scale || scale === 1) return def;
+    return { ...def, radius: (def.radius || 0) * scale, range: (def.range || 0) * scale };
+  }
+
+  zoomLimit() {
+    return this.player && this.player.giant ? 48 : 26;
+  }
+
   startFlight(index) {
+    if (this.bonus) return;
     if (this.world.inHouse) {
       this.world.exitHouse();
       this.applyOutdoorFog();
@@ -3205,10 +3409,13 @@ class Game {
     this.equipped = index;
     this.weapon = index;
     sfx.setRotor(true);
-    this.toast('Propeller head — you are flying', 'good');
+    this.spawnFlightRings();
+    this.toast('Propeller head — fly through 10 golden rings', 'good');
   }
 
   stopFlight(opts = {}) {
+    if (this.bonus) this.finishBonus({ quiet: true, restore: false });
+    this.clearFlightRings();
     const was = !!(this.player && this.player.flying);
     if (this.player) {
       this.player.flying = false;
@@ -3224,11 +3431,355 @@ class Game {
     if (was) this.refreshStrips();
   }
 
+  /* Golden hoops at cruise height, spread across the whole map. */
+  spawnFlightRings() {
+    this.clearFlightRings();
+    const edge = Math.max(12, this.world.half - 6);
+    const count = this.world.half >= 120 ? 24 : this.world.half >= 80 ? 20 : 16;
+    const cols = Math.max(4, Math.round(Math.sqrt(count)));
+    const rows = Math.ceil(count / cols);
+    const jxMax = Math.min(8, (2 * edge / Math.max(1, cols - 1)) * 0.35);
+    const jzMax = Math.min(8, (2 * edge / Math.max(1, rows - 1)) * 0.35);
+    const geo = new THREE.TorusGeometry(RING_RADIUS, RING_TUBE, 8, 28);
+    const mat = mkMat(0xffd23f, { emissive: 0xffb703, emissiveIntensity: 0.85 });
+    this._ringGeo = geo;
+    this._ringMat = mat;
+    this.rings = [];
+    this.ringScore = 0;
+    const px = this.player.pos.x;
+    const pz = this.player.pos.z;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const jx = (Math.random() - 0.5) * jxMax;
+        const jz = (Math.random() - 0.5) * jzMax;
+        let x = -edge + (c / (cols - 1)) * (2 * edge) + jx;
+        let z = -edge + (r / (rows - 1)) * (2 * edge) + jz;
+        x = clamp(x, -edge, edge);
+        z = clamp(z, -edge, edge);
+        if (Math.hypot(x - px, z - pz) < 14) {
+          const ang = Math.atan2(z - pz, x - px) || 0.4;
+          x = clamp(px + Math.cos(ang) * 14, -edge, edge);
+          z = clamp(pz + Math.sin(ang) * 14, -edge, edge);
+        }
+        const surf = this.world.surfaceTopAny(x, z);
+        const floor = surf > -Infinity ? surf : 0;
+        const y = floor + 6.6 + 1;
+        const yaw = Math.random() * Math.PI * 2;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        mesh.rotation.y = yaw;
+        this.scene.add(mesh);
+        this.rings.push({ mesh, yaw, baseY: y, got: false });
+      }
+    }
+    this._ringPrev = null;
+    if (this.flightHud) this.flightHud.hidden = false;
+    if (this.ringEl) this.ringEl.textContent = '0';
+  }
+
+  clearFlightRings() {
+    for (const ring of this.rings || []) this.scene.remove(ring.mesh);
+    this.rings = null;
+    this._ringPrev = null;
+    this.ringScore = 0;
+    if (this._ringGeo) { this._ringGeo.dispose(); this._ringGeo = null; }
+    if (this._ringMat) { this._ringMat.dispose(); this._ringMat = null; }
+    if (this.flightHud) this.flightHud.hidden = true;
+  }
+
+  spinFlightRings() {
+    if (!this.rings) return;
+    for (const ring of this.rings) {
+      if (ring.got) continue;
+      ring.mesh.rotation.z = Math.sin(this.time * 0.8 + ring.baseY) * 0.08;
+      ring.mesh.position.y = ring.baseY + Math.sin(this.time * 1.4 + ring.yaw) * 0.18;
+    }
+  }
+
+  checkFlightRings() {
+    if (!this.rings || !this.player) return;
+    const p = this.player.pos;
+    const cx = p.x;
+    const cy = p.y + 1;
+    const cz = p.z;
+    if (!this._ringPrev) {
+      this._ringPrev = { x: cx, y: cy, z: cz };
+      return;
+    }
+    const prev = this._ringPrev;
+    for (const ring of this.rings) {
+      if (ring.got) continue;
+      const nx = Math.sin(ring.yaw);
+      const nz = Math.cos(ring.yaw);
+      const ry = ring.mesh.position.y;
+      const d0 = (prev.x - ring.mesh.position.x) * nx + (prev.z - ring.mesh.position.z) * nz;
+      const d1 = (cx - ring.mesh.position.x) * nx + (cz - ring.mesh.position.z) * nz;
+      const crossed = (d0 <= 0 && d1 >= 0) || (d0 >= 0 && d1 <= 0);
+      const near = Math.min(Math.abs(d0), Math.abs(d1)) < 0.45;
+      if (!crossed && !near) continue;
+      const denom = d1 - d0;
+      const t = Math.abs(denom) < 1e-6 ? 0.5 : clamp(-d0 / denom, 0, 1);
+      const ix = prev.x + (cx - prev.x) * t;
+      const iy = prev.y + (cy - prev.y) * t;
+      const iz = prev.z + (cz - prev.z) * t;
+      const dx = ix - ring.mesh.position.x;
+      const dy = iy - ry;
+      const dz = iz - ring.mesh.position.z;
+      const along = dx * nx + dz * nz;
+      const radial = Math.hypot(dx - along * nx, dy, dz - along * nz);
+      if (radial > RING_HOLE) continue;
+      ring.got = true;
+      ring.mesh.visible = false;
+      this.ringScore++;
+      sfx.swap();
+      if (navigator.vibrate) navigator.vibrate(12);
+      if (this.ringEl) this.ringEl.textContent = String(this.ringScore);
+      if (this.ringScore >= RING_NEED) {
+        this._ringPrev = { x: cx, y: cy, z: cz };
+        this.beginBonus();
+        return;
+      }
+      if (this.ringScore === 1 || this.ringScore === 5) {
+        this.toast(`Ring ${this.ringScore} of ${RING_NEED}`, 'good');
+      }
+    }
+    this._ringPrev = { x: cx, y: cy, z: cz };
+  }
+
+  stashWorldVis() {
+    this._worldVis = [];
+    for (const ch of [...this.scene.children]) {
+      if (ch === this.player.root) continue;
+      this._worldVis.push([ch, ch.visible]);
+      ch.visible = false;
+    }
+  }
+
+  restoreWorldVis() {
+    if (!this._worldVis) return;
+    for (const [ch, vis] of this._worldVis) ch.visible = vis;
+    this._worldVis = null;
+  }
+
+  scatterBonusSpots(n) {
+    const spots = [];
+    let guard = 0;
+    while (spots.length < n && guard < n * 40) {
+      guard++;
+      const x = (Math.random() * 2 - 1) * 22;
+      const z = (Math.random() * 2 - 1) * 22;
+      if (Math.hypot(x, z) < 2.8) continue;
+      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 2.35)) continue;
+      spots.push({ x, z });
+    }
+    return spots;
+  }
+
+  buildBonusField() {
+    const root = new THREE.Group();
+    const mats = [];
+    const geos = [];
+    const take = (m) => { mats.push(m); return m; };
+    const grass = take(mkMat(0x74c745));
+    const ground = new THREE.Mesh(BR, grass);
+    ground.scale.set(58, 0.24, 58);
+    ground.position.y = -0.12;
+    const pathMat = take(mkMat(0xe7d7a1));
+    const pathX = new THREE.Mesh(BR, pathMat);
+    pathX.scale.set(3.2, 0.26, 52);
+    pathX.position.y = -0.08;
+    const pathZ = new THREE.Mesh(BR, pathMat);
+    pathZ.scale.set(52, 0.26, 3.2);
+    pathZ.position.y = -0.08;
+    root.add(ground, pathX, pathZ);
+
+    const gemGeo = new THREE.OctahedronGeometry(0.34, 0);
+    geos.push(gemGeo);
+    const coinMat = take(mkMat(0xffd23f, { emissive: 0xffb703, emissiveIntensity: 0.45 }));
+    const gemMats = [0x3ec6ff, 0x2ee6a6, 0xe23b6a, 0xc084fc].map((c) => take(mkMat(c, { emissive: c, emissiveIntensity: 0.35 })));
+    const giftMats = [0xe23b4a, 0x2f7de1, 0x2aa876, 0xf5aa0f].map((c) => take(mkMat(c)));
+    const ribbon = take(mkMat(0xffe14a));
+    const plan = [...Array(28).fill('coin'), ...Array(14).fill('gem'), ...Array(8).fill('gift')];
+    const spots = this.scatterBonusSpots(plan.length);
+    const prizes = [];
+    spots.forEach((spot, i) => {
+      const kind = plan[i];
+      let mesh;
+      if (kind === 'coin') {
+        mesh = new THREE.Mesh(CY, coinMat);
+        mesh.scale.set(0.42, 0.07, 0.42);
+        mesh.rotation.x = Math.PI / 2;
+      } else if (kind === 'gem') {
+        mesh = new THREE.Mesh(gemGeo, gemMats[i % gemMats.length]);
+      } else {
+        mesh = new THREE.Group();
+        const box = new THREE.Mesh(BR, giftMats[i % giftMats.length]);
+        box.scale.set(0.52, 0.52, 0.52);
+        const v = new THREE.Mesh(BR, ribbon);
+        v.scale.set(0.12, 0.56, 0.56);
+        const h = new THREE.Mesh(BR, ribbon);
+        h.scale.set(0.56, 0.56, 0.12);
+        const bow = new THREE.Mesh(BR, ribbon);
+        bow.scale.set(0.24, 0.14, 0.24);
+        bow.position.y = 0.32;
+        mesh.add(box, v, h, bow);
+      }
+      mesh.position.set(spot.x, kind === 'coin' ? 0.72 : 0.9, spot.z);
+      mesh.userData.kind = kind;
+      mesh.userData.baseY = mesh.position.y;
+      mesh.userData.phase = Math.random() * 6;
+      root.add(mesh);
+      prizes.push(mesh);
+    });
+    return { root, prizes, geos, mats };
+  }
+
+  beginBonus() {
+    if (this.bonus || !this.player) return;
+    const back = {
+      pos: this.player.pos.clone(),
+      vel: this.player.vel.clone(),
+      yaw: this.player.yaw,
+      orbitYaw: this.orbit.yaw,
+      orbitPitch: this.orbit.pitch,
+      orbitDist: this.orbit.dist,
+      wantDist: this.orbit.wantDist
+    };
+    this.clearFlightRings();
+    const fog = this.scene.fog;
+    const background = this.scene.background;
+    this.stashWorldVis();
+    const field = this.buildBonusField();
+    this.scene.add(field.root);
+    this.player.bonusRun = true;
+    this.player.applyBodyScale();
+    this.player.vel.set(0, 0, 0);
+    this.player.pos.set(0, 0, 0);
+    this.player.setPropeller(false);
+    sfx.setRotor(false);
+    this.scene.fog = new THREE.Fog(0xd4f0ff, 36, 90);
+    this.scene.background = new THREE.Color(0x8ecfff);
+    this.bonus = {
+      root: field.root,
+      prizes: field.prizes,
+      geos: field.geos,
+      mats: field.mats,
+      left: BONUS_TIME,
+      coins: 0,
+      gems: 0,
+      gifts: 0,
+      back,
+      fog,
+      background
+    };
+    if (this.bonusHud) this.bonusHud.hidden = false;
+    if (this.bonusTimeEl) this.bonusTimeEl.textContent = String(BONUS_TIME);
+    if (this.bonusScoreEl) this.bonusScoreEl.textContent = '0';
+    if (this.bonusDetailEl) this.bonusDetailEl.textContent = 'coins, gems, gifts';
+    if (this.mode !== 'explore') {
+      this.mode = 'explore';
+      sfx.setFlame(false);
+      this.refreshStrips();
+    }
+    this.toast('Bonus level — grab coins, gems, and gifts for 30 seconds', 'win');
+  }
+
+  collectBonus() {
+    const bonus = this.bonus;
+    if (!bonus) return;
+    const p = this.player.pos;
+    const chest = new THREE.Vector3(p.x, p.y + 0.9, p.z);
+    for (let i = bonus.prizes.length - 1; i >= 0; i--) {
+      const item = bonus.prizes[i];
+      if (item.position.distanceTo(chest) >= 1.35) continue;
+      bonus.root.remove(item);
+      bonus.prizes.splice(i, 1);
+      if (item.userData.kind === 'coin') bonus.coins++;
+      else if (item.userData.kind === 'gem') bonus.gems++;
+      else bonus.gifts++;
+      sfx.chime();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }
+    const total = bonus.coins + bonus.gems + bonus.gifts;
+    if (this.bonusScoreEl) this.bonusScoreEl.textContent = String(total);
+    if (this.bonusDetailEl) {
+      const bit = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+      this.bonusDetailEl.textContent = `${bit(bonus.coins, 'coin')} · ${bit(bonus.gems, 'gem')} · ${bit(bonus.gifts, 'gift')}`;
+    }
+  }
+
+  spinBonus(dt) {
+    if (!this.bonus) return;
+    for (const item of this.bonus.prizes) {
+      item.rotation.y += dt * (item.userData.kind === 'coin' ? 2.6 : 1.7);
+      item.position.y = item.userData.baseY + Math.sin(this.time * 2.2 + item.userData.phase) * 0.12;
+    }
+  }
+
+  tickBonus(dt, move) {
+    this.player.update(dt, move, this.jumpQueued > 0);
+    if (!this.bonus) return;
+    this.bonus.left -= dt;
+    this.collectBonus();
+    this.spinBonus(dt);
+    const left = Math.max(0, this.bonus.left);
+    if (this.bonusTimeEl) this.bonusTimeEl.textContent = String(Math.ceil(left));
+    const done = left <= 0 || this.bonus.prizes.length === 0;
+    if (done) {
+      this.finishBonus();
+      return;
+    }
+    this.updateCamera(dt);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  finishBonus(opts = {}) {
+    const bonus = this.bonus;
+    if (!bonus) return;
+    this.bonus = null;
+    if (this.player) {
+      this.player.bonusRun = false;
+      this.player.applyBodyScale();
+    }
+    this.scene.remove(bonus.root);
+    for (const m of bonus.mats) m.dispose();
+    for (const g of bonus.geos) g.dispose();
+    this.restoreWorldVis();
+    if (this.bonusHud) this.bonusHud.hidden = true;
+    if (opts.restore === false) {
+      this.scene.fog = bonus.fog;
+      this.scene.background = bonus.background;
+      return;
+    }
+    const s = bonus.back;
+    this.player.pos.copy(s.pos);
+    this.player.vel.copy(s.vel);
+    this.player.yaw = s.yaw;
+    this.player.flying = true;
+    this.player.liftT = 0;
+    this.player.setPropeller(true);
+    sfx.setRotor(true);
+    this.orbit.yaw = s.orbitYaw;
+    this.orbit.pitch = s.orbitPitch;
+    this.orbit.dist = s.orbitDist;
+    this.orbit.wantDist = s.wantDist;
+    this.applyOutdoorFog();
+    this.spawnFlightRings();
+    const total = bonus.coins + bonus.gems + bonus.gifts;
+    const bit = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    this.toast(`Bonus complete — ${bit(bonus.coins, 'coin')}, ${bit(bonus.gems, 'gem')}, ${bit(bonus.gifts, 'gift')} (${total}). Back to your world.`, 'win');
+  }
+
   confirmWeapon(focus) {
+    if (this.bonus) { this.toast('Finish the bonus round first', 'good'); return; }
     this.stripFocus = focus;
     if (focus <= 0) { this.unequipWeapon(); return; }
     const def = WEAPONS[focus - 1];
     voice.speak(def.name);
+    if (def.kind === 'godzilla') {
+      this.toggleGodzilla();
+      return;
+    }
     if (def.kind === 'prop') {
       if (this.player.flying) this.stopFlight();
       else this.startFlight(focus - 1);
@@ -3236,12 +3787,13 @@ class Game {
       return;
     }
     if (this.player.flying) this.stopFlight();
-    if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost') {
+    if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost' || def.kind === 'hair') {
       if (def.kind === 'ufo') {
         if (!this.saucer) this.launchSaucer();
       } else if (def.kind === 'halloween') this.unleashHalloween();
       else if (def.kind === 'flood') this.startFlood();
       else if (def.kind === 'water') this.unleashWater();
+      else if (def.kind === 'hair') this.unleashHair();
       else this.unleashFrost();
       this.refreshStrips();
       return;
@@ -3252,6 +3804,7 @@ class Game {
   }
 
   unequipWeapon() {
+    if (this.bonus) { this.toast('Finish the bonus round first', 'good'); return; }
     if (this.player && this.player.flying) this.stopFlight();
     this.equipped = null;
     this.stripFocus = 0;
@@ -3336,6 +3889,7 @@ class Game {
     if (this.flashWash && !(this.nuke && this.nuke.stage === 'flash')) this.flashWash.style.opacity = '0';
     if (this.mode !== 'weather') this.setMode('weather');
     sfx.unloopAll();
+    sfx.setCrickets(def.id === 'night');
     if (def.id === 'clear') this.defuseNuke();
     if (def.id !== 'quake') this.clearChasm();
     this.rain.points.visible = false;
@@ -3461,13 +4015,13 @@ class Game {
 
   /* ---------------------------------------------------------- attacks */
   isScenario(def) {
-    return !!def && (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost');
+    return !!def && (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost' || def.kind === 'hair');
   }
 
   armedWeapon() {
     if (this.equipped == null) return null;
     const def = WEAPONS[this.equipped];
-    if (!def || this.isScenario(def) || def.kind === 'prop') return null;
+    if (!def || this.isScenario(def) || def.kind === 'prop' || def.kind === 'godzilla') return null;
     return def;
   }
 
@@ -3856,6 +4410,7 @@ class Game {
   }
 
   tryFire(ndc) {
+    if (this.bonus) return false;
     const exploreFire = this.mode === 'explore';
     if ((!exploreFire && this.mode !== 'weapon') || !this.started) return false;
     const def = this.armedWeapon();
@@ -3863,7 +4418,8 @@ class Game {
     if (this.fireCd > 0) return false;
     this.fireCd = def.cd;
     const p = this.player.pos;
-    const chest = new THREE.Vector3(p.x, p.y + 1.2, p.z);
+    const scale = this.playerScale();
+    const chest = new THREE.Vector3(p.x, p.y + 1.2 * scale, p.z);
     this.pick.setFromCamera(ndc, this.camera);
     const ro = this.pick.ray.origin, rd = this.pick.ray.direction;
 
@@ -3878,13 +4434,13 @@ class Game {
     }
     if (def.kind === 'grenade') {
       sfx.toss();
-      const muzzle = chest.clone().addScaledVector(aim, 0.7).add(new THREE.Vector3(0, 0.35, 0));
+      const muzzle = chest.clone().addScaledVector(aim, 0.7 * scale).add(new THREE.Vector3(0, 0.35 * scale, 0));
       const shot = aim.clone();
       shot.y = 0.72;
       shot.normalize();
       this.launchBlock(muzzle, shot, {
         speed: 12.5, life: 3.5, kind: 'grenade', def,
-        color: 0x3f6b32, grav: 16, arm: 0.32
+        color: 0x3f6b32, grav: 16, arm: 0.32, scale
       });
       this._swing(0.45);
       return true;
@@ -3893,7 +4449,7 @@ class Game {
       if (def.kind === 'rocket') sfx.launch();
       else if (def.kind === 'gun') sfx.gun();
       else sfx.fireTick();
-      const muzzle = chest.clone().addScaledVector(aim, 0.85).add(new THREE.Vector3(0, 0.12, 0));
+      const muzzle = chest.clone().addScaledVector(aim, 0.85 * scale).add(new THREE.Vector3(0, 0.12 * scale, 0));
       const shot = aim.clone();
       const spread = def.kind === 'gun' ? 0.04 : def.kind === 'stream' ? 0.12 : 0.01;
       shot.x += (Math.random() - 0.5) * spread;
@@ -3906,8 +4462,8 @@ class Game {
         ? [0xe8402a, 0xff8a3d, 0xffc42e]
         : [0xe8402a, 0x2f7de1, 0xffc42e, 0x35b56a, 0x9b5de5, 0xff8a3d];
       this.launchBlock(muzzle, shot, {
-        speed, life: def.range / speed, kind: def.kind, def,
-        color: colors[this._shotN++ % colors.length]
+        speed, life: (def.range * scale) / speed, kind: def.kind, def,
+        color: colors[this._shotN++ % colors.length], scale
       });
       this._swing(def.kind === 'rocket' ? 0.5 : 0.12);
       return true;
@@ -3918,7 +4474,7 @@ class Game {
       if (prop.gone || hits >= def.maxBreak) continue;
       const pt = this.world.hitPoint(prop, chest);
       const dxz = new THREE.Vector2(pt.x - p.x, pt.z - p.z);
-      if (dxz.length() > def.range) continue;
+      if (dxz.length() > def.range * scale) continue;
       const dxzN = dxz.clone().normalize();
       const cos = dxzN.x * fwd.x + dxzN.y * fwd.z;
       if (Math.acos(clamp(cos, -1, 1)) > def.arc / 2) continue;
@@ -3927,12 +4483,12 @@ class Game {
       hits++;
     }
     if (this.life) {
-      for (const c of this.life.inFront(p.x, p.z, fwd, def.range, def.arc)) {
+      for (const c of this.life.inFront(p.x, p.z, fwd, def.range * scale, def.arc)) {
         this.life.hurt(c, def.dmg);
         this.fx.spawn(c.mesh.position.x, c.mesh.position.y + 0.4, c.mesh.position.z, 'debris', 5);
       }
     }
-    this.bricksInRadius(chest.clone().addScaledVector(fwd, def.range * 0.7), def.radius + 1.1, (rec) => {
+    this.bricksInRadius(chest.clone().addScaledVector(fwd, def.range * scale * 0.7), def.radius * scale + 1.1, (rec) => {
       if (rec._dmg >= 25) return;
       this.hurtBrick(rec, def.dmg);
     });
@@ -3977,14 +4533,14 @@ class Game {
     }
   }
 
-  explode(at, def) {
+  explode(at, def, scale = 1) {
     sfx.explode();
     const colors = [0xe8402a, 0x2f7de1, 0xffc42e, 0x35b56a, 0x9b5de5, 0xff8a3d];
     for (let i = 0; i < 8; i++) {
       const dir = new THREE.Vector3(Math.random() - 0.5, 0.35 + Math.random() * 0.7, Math.random() - 0.5).normalize();
       this.launchBlock(at.clone(), dir, {
         speed: 5 + Math.random() * 4, life: 0.45, kind: 'burst', def,
-        color: colors[i % colors.length]
+        color: colors[i % colors.length], scale
       });
     }
     this.quietFx = true;
@@ -4002,10 +4558,21 @@ class Game {
     return near[Math.floor(Math.random() * near.length)];
   }
 
-  /* Three separate bolts, spaced so each crack and strobe lands on its own. */
+  /* Prop damage from snow, hurricane, and tsunami still lands and still
+     cracks, but those three skip the hit bursts that stall the Pi. */
+  applyWeatherHit(pr, amount, pt) {
+    const id = this.weather;
+    const mute = id === 'snow' || id === 'hurricane' || id === 'tsunami';
+    const prev = this.quietFx;
+    if (mute) this.quietFx = true;
+    this.world.applyHit(pr, amount, pt);
+    if (mute) this.quietFx = prev;
+  }
+
+  /* One bolt at a time, then a random gap, for as long as thunderstorm is selected. */
   armStorm() {
     this.clearBolt();
-    this.storm = { left: 3, wait: 0.45 };
+    this.storm = { wait: 0.35 + Math.random() * 0.5 };
   }
 
   clearBolt() {
@@ -4128,13 +4695,16 @@ class Game {
   updateStorm(dt) {
     this.updateBolt(dt);
     this.updateStormFlash(dt);
-    if (this.weather !== 'thunder' || !this.storm) return;
+    if (this.weather !== 'thunder') {
+      this.storm = null;
+      return;
+    }
+    if (!this.storm) this.storm = { wait: 0.45 + Math.random() * 0.7 };
+    if (this.boltStrike) return;
     this.storm.wait -= dt;
     if (this.storm.wait > 0) return;
-    this.storm.left -= 1;
     this.strikeLightning();
-    if (this.storm.left <= 0) this.storm = null;
-    else this.storm.wait = 1.25;
+    this.storm.wait = 0.75 + Math.random() * 1.85;
   }
 
   /* Damage only the ground the bolt actually hits. */
@@ -4170,9 +4740,22 @@ class Game {
   armNuke() {
     if (this.nuke && this.nuke.stage !== 'done') return;
     const p = this.player.pos;
-    const H = this.world.half;
-    const tx = clamp(p.x + (Math.random() * 2 - 1) * 8, -H + 10, H - 10);
-    const tz = clamp(p.z + 26 + Math.random() * 18, -H + 10, H - 10);
+    const yaw = this.orbit ? this.orbit.yaw : this.player.yaw;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const H = this.world.half - 6;
+    let tx = p.x + fx * 16;
+    let tz = p.z + fz * 16;
+    const open = (x, z) => Math.abs(x) <= H && Math.abs(z) <= H && !this.world.inRiver(x, z);
+    if (!open(tx, tz)) {
+      let placed = false;
+      for (const dist of [12, 20, 8, 24, 6]) {
+        const x = clamp(p.x + fx * dist, -H, H);
+        const z = clamp(p.z + fz * dist, -H, H);
+        if (this.world.inRiver(x, z)) continue;
+        tx = x; tz = z; placed = true; break;
+      }
+      if (!placed) { tx = clamp(p.x, -H, H); tz = clamp(p.z, -H, H); }
+    }
     const bomb = new THREE.Group();
     const casing = new THREE.Mesh(SP, mkMat(0x3c4650, { metalness: 0.5, roughness: 0.4 }));
     casing.scale.set(1.1, 1.6, 1.1);
@@ -4190,6 +4773,135 @@ class Game {
   updateLife(dt) {
     if (this.life) this.life.update(dt);
     if (this.train) this.train.update(dt, this.camera);
+    this.tickHair(dt);
+  }
+
+  /* Face box in the figure's own space, so a turned person still grows hair off the chin. */
+  localAabb(group) {
+    const box = new THREE.Box3();
+    group.updateWorldMatrix(true, true);
+    const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+    const corner = new THREE.Vector3();
+    group.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      if (o.parent && o.parent.name === 'beard') return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const bb = o.geometry.boundingBox;
+      for (const x of [bb.min.x, bb.max.x]) {
+        for (const y of [bb.min.y, bb.max.y]) {
+          for (const z of [bb.min.z, bb.max.z]) {
+            corner.set(x, y, z).applyMatrix4(o.matrixWorld).applyMatrix4(inv);
+            box.expandByPoint(corner);
+          }
+        }
+      }
+    });
+    return box;
+  }
+
+  collectHairHosts() {
+    const hosts = [];
+    const seen = new Set();
+    const add = (obj) => {
+      if (!obj || seen.has(obj) || obj.userData.beard) return;
+      seen.add(obj);
+      hosts.push(obj);
+    };
+    const faced = new Set(['person', 'cow', 'dog', 'cat', 'chicken', 'bird']);
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || !c.mesh) continue;
+        if (faced.has(c.kind)) add(c.mesh);
+        c.mesh.traverse((o) => {
+          if (o !== c.mesh && o.userData && o.userData.inhabitant) add(o);
+        });
+      }
+    }
+    for (const root of this.scenarioRoots()) {
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant) add(o);
+      });
+    }
+    return hosts;
+  }
+
+  attachBeard(host, mat) {
+    const box = this.localAabb(host);
+    if (box.isEmpty()) return null;
+    const h = box.max.y - box.min.y;
+    if (h < 0.02) return null;
+    const voxel = Math.max(0.035, h * 0.14);
+    const frontZ = box.min.z;
+    const backZ = box.max.z;
+    const mouthY = box.min.y + h * 0.64;
+    const cx = (box.min.x + box.max.x) * 0.5;
+    const g = new THREE.Group();
+    g.name = 'beard';
+    host.add(g);
+    host.userData.beard = g;
+    const stache = new THREE.Mesh(BR, mat);
+    stache.scale.set(voxel * 1.8, voxel * 0.32, voxel * 0.42);
+    stache.position.set(cx, mouthY, frontZ - voxel * 0.22);
+    const tee = new THREE.Mesh(BR, mat);
+    tee.scale.set(voxel * 0.55, voxel * 0.75, voxel * 0.4);
+    tee.position.set(cx, mouthY - voxel * 0.55, frontZ - voxel * 0.12);
+    g.add(stache, tee);
+    return { group: g, mat, voxel, frontZ, backZ, mouthY, feetY: box.min.y, cx, n: 0 };
+  }
+
+  /* One more brick. The first ones hang from the chin; the rest drag behind on the ground. */
+  growBeard(rec) {
+    const { voxel, mouthY, feetY, frontZ, backZ, cx, mat, group, n } = rec;
+    const mesh = new THREE.Mesh(BR, mat);
+    const s = voxel * 0.92;
+    mesh.scale.setScalar(s);
+    const drop = Math.max(2, Math.ceil((mouthY - feetY) / (voxel * 0.9)));
+    if (n < drop) {
+      mesh.position.set(cx, mouthY - voxel * 0.85 - n * voxel * 0.88, frontZ - voxel * 0.05 + n * voxel * 0.12);
+    } else {
+      const k = n - drop;
+      mesh.position.set(cx, feetY + s * 0.5, backZ + voxel * 0.15 + k * voxel * 0.95);
+    }
+    group.add(mesh);
+    rec.n++;
+  }
+
+  unleashHair() {
+    if (this.hair) {
+      this.toast('The hair is still growing', 'good');
+      return;
+    }
+    const hosts = this.collectHairHosts();
+    if (!hosts.length) {
+      this.toast('Nobody here to grow a beard', 'bad');
+      return;
+    }
+    if (!this._hairMats) {
+      this._hairMats = [0x2a1a10, 0x1a120c, 0x6b3a1e, 0xc4a574, 0x3a3a3a, 0x8b1e1e, 0xe6d3a3].map((hex) => mkMat(hex));
+    }
+    const beards = [];
+    hosts.forEach((host, i) => {
+      const rec = this.attachBeard(host, this._hairMats[i % this._hairMats.length]);
+      if (rec) beards.push(rec);
+    });
+    if (!beards.length) {
+      this.toast('Nobody here to grow a beard', 'bad');
+      return;
+    }
+    this.hair = { t: 0, beards };
+    sfx.chime();
+    this.toast(`Hair — ${beards.length} inhabitants sprouted a moustache and goatee. A new block grows every minute.`, 'good');
+  }
+
+  tickHair(dt) {
+    if (!this.hair) return;
+    this.hair.t += dt;
+    let guard = 0;
+    while (this.hair.t >= 60 && guard < 8) {
+      this.hair.t -= 60;
+      for (const b of this.hair.beards) this.growBeard(b);
+      guard++;
+    }
   }
 
   updateNuke(dt) {
@@ -4229,26 +4941,48 @@ class Game {
   }
 
   _nukeBlast(n, gTop) {
-    const at = new THREE.Vector3(n.tx, gTop + 3, n.tz);
     const def = WEATHERS.find((x) => x.id === 'nuke');
+    const radius = def ? def.radius : 26;
+    const at = new THREE.Vector3(n.tx, (gTop || 0) + 1.2, n.tz);
     sfx.explode(); sfx.thunder();
     if (navigator.vibrate) navigator.vibrate([90, 40, 260]);
     this.shakeT = 2.2;
     this.quietFx = true;
+    const bucket = this.world._b && this.world._b.group;
     for (const prop of this.world.props) {
       if (prop.gone) continue;
-      if (Math.hypot(prop.cx - n.tx, prop.cz - n.tz) < def.radius) {
-        for (let i = 0; i < 3; i++) this.world.applyHit(prop, def.dmg, null);
+      if (Math.hypot(prop.cx - n.tx, prop.cz - n.tz) > radius) continue;
+      this.world.applyHit(prop, Math.max(prop.max - prop.dmg, 1), null);
+      const seen = new Set();
+      for (const pt of prop.parts) {
+        const parent = pt.mesh && pt.mesh.parent;
+        if (!parent || parent === bucket || parent === this.scene || seen.has(parent)) continue;
+        seen.add(parent);
+        parent.visible = false;
       }
     }
-    this.bricksInRadius(at, def.radius - 2, (rec) => this.hurtBrick(rec, def.dmg));
-    this.damageSplash(def, at, null);
-    if (this.life) this.life.killNear(n.tx, n.tz, def.radius + 4);
+    this.bricksInRadius(at, radius, (rec) => this.hurtBrick(rec, 400));
+    if (this.life) this.life.killNear(n.tx, n.tz, radius + 4);
+    const pp = this.player.pos;
+    if (Math.hypot(pp.x - n.tx, pp.z - n.tz) < radius + 1.5) {
+      const push = new THREE.Vector3(pp.x - n.tx, 0, pp.z - n.tz);
+      if (push.lengthSq() < 0.04) push.set(1, 0, 0);
+      push.normalize().multiplyScalar(11);
+      push.y = 7;
+      this.player.vel.add(push);
+      sfx.hurt();
+    }
     this.quietFx = false;
-    // Permanent terrain crater scaled to the blast: ~80% of the damage
-    // radius, 1.7 deep at GZ, terraced walls the player can walk down;
-    // char ring + pit floor come from carveCrater itself
-    this.world.carveCrater(n.tx, n.tz, Math.round(def.radius * 0.8), 1.7);
+    const craterR = Math.max(10, Math.round(radius * 0.85));
+    this.world.carveCrater(n.tx, n.tz, craterR, 1.7);
+    for (const s of this.world.solids) {
+      if (!s || s.terrain || s.disabled || !s.box) continue;
+      const cx = (s.box.min.x + s.box.max.x) * 0.5;
+      const cz = (s.box.min.z + s.box.max.z) * 0.5;
+      if (Math.hypot(cx - n.tx, cz - n.tz) > craterR) continue;
+      if (s.box.max.y > 14) continue;
+      s.disabled = true;
+    }
     n.gTop = gTop;
     this.toast('☢️ GROUND ZERO — 25kt. The map will remember that.', 'bad');
   }
@@ -4285,7 +5019,7 @@ class Game {
       if (this.weatherDmgT >= def.every) {
         this.weatherDmgT = 0;
         if (def.strike) {
-          // three jagged bolts are queued by armStorm, not this tick
+          // bolts keep striking from armStorm until the weather changes
         } else if (def.id === 'meteor') {
           this.spawnMeteor();
         } else if (def.mover) {
@@ -4304,7 +5038,7 @@ class Game {
           const pr = this.weatherPickProp();
           if (pr) {
             const pt = this.world.hitPoint(pr, new THREE.Vector3(pr.cx, 1.5, pr.cz));
-            this.world.applyHit(pr, def.dmg, pt);
+            this.applyWeatherHit(pr, def.dmg, pt);
           }
         }
       }
@@ -4313,7 +5047,7 @@ class Game {
     if (def.shake && !this.chasm && this.weatherT >= 5) this.openChasm();
     if (this.chasm) this.updateChasm(dt);
 
-    // mover: tornado / hurricane funnel roams, sucking up debris and smashing props
+    // mover: tornado / hurricane funnel roams and smashes props
     if (def.mover) {
       if (this.weatherT > 2.5) {
         this.weatherT = 0;
@@ -4327,12 +5061,6 @@ class Game {
       const d = this.tornadoTgt.clone().sub(this.tornadoPos); d.y = 0;
       if (d.length() > 0.5) this.tornadoPos.addScaledVector(d.normalize(), Math.min(speed * dt, d.length()));
       this.funnel.update(dt, this.tornadoPos.x, 0, this.tornadoPos.z, def.id === 'hurricane' ? 2 : 1);
-      if (def.id === 'hurricane') {
-        for (let i = 0; i < 3; i++) {
-          const a = Math.random() * Math.PI * 2;
-          this.fx.spawn(this.tornadoPos.x + Math.cos(a) * 5, 1 + Math.random() * 12, this.tornadoPos.z + Math.sin(a) * 5, 'debris', 1);
-        }
-      }
       this.weatherDmgT += dt;
       if (this.weatherDmgT >= def.every) {
         this.weatherDmgT = 0;
@@ -4340,7 +5068,7 @@ class Game {
           if (pr.gone) continue;
           if (Math.hypot(pr.cx - this.tornadoPos.x, pr.cz - this.tornadoPos.z) > def.radius + 2) continue;
           const pt = this.world.hitPoint(pr, this.tornadoPos.clone().setY(2));
-          this.world.applyHit(pr, def.dmg, pt);
+          this.applyWeatherHit(pr, def.dmg, pt);
         }
       }
     }
@@ -4357,8 +5085,7 @@ class Game {
         if (Math.abs(pr.cz - this.waveZ) > 5) continue;
         pr._ts = this.waveId + ':' + Math.floor(this.waveZ / 6);
         const pt = this.world.hitPoint(pr, new THREE.Vector3(pr.cx, 2, this.waveZ));
-        this.world.applyHit(pr, def.dmg, pt);
-        this.fx.spawn(pr.cx, 2, pr.cz, 'fire', 6);
+        this.applyWeatherHit(pr, def.dmg, pt);
       }
       if (Math.abs(p.z - this.waveZ) < 6 && p.y < 6) {
         this.player.vel.z += (this.player.pos.z < this.waveZ ? -14 : 14) * dt * 8;
@@ -4462,6 +5189,7 @@ class Game {
       this._shotPool.push(mesh);
     }
     mesh.visible = true;
+    mesh.scale.setScalar(1);
     return mesh;
   }
 
@@ -4475,6 +5203,8 @@ class Game {
     const mesh = this.takeShotBrick(spec.color);
     mesh.position.copy(origin);
     mesh.rotation.set(Math.random() * 0.5, Math.random() * Math.PI * 2, Math.random() * 0.5);
+    const scale = spec.scale || 1;
+    mesh.scale.setScalar(scale);
     this.blockShots.push({
       mesh,
       vel: dir.clone().multiplyScalar(spec.speed),
@@ -4483,12 +5213,14 @@ class Game {
       def: spec.def,
       grav: spec.grav || 0,
       arm: spec.arm || 0,
-      spin: 5 + Math.random() * 6
+      spin: 5 + Math.random() * 6,
+      scale
     });
   }
 
   releaseBlock(b) {
     b.mesh.visible = false;
+    b.mesh.scale.setScalar(1);
   }
 
   clearBlockShots() {
@@ -4519,12 +5251,14 @@ class Game {
         const gy = this.world.surfaceTop(Math.floor(b.mesh.position.x + 0.5), Math.floor(b.mesh.position.z + 0.5), 60);
         grounded = gy > -Infinity && b.mesh.position.y <= gy + 0.25;
       }
+      const grown = this.scaledWeapon(b.def, b.scale);
+      const shotScale = b.scale || 1;
       if (body && (!hit.solid || body.t < hit.t)) {
-        if (b.kind === 'grenade') this.fragBlast(body.c.mesh.position.clone(), b.def);
-        else if (b.kind === 'rocket') this.explode(body.c.mesh.position.clone(), b.def);
+        if (b.kind === 'grenade') this.fragBlast(body.c.mesh.position.clone(), grown, shotScale);
+        else if (b.kind === 'rocket') this.explode(body.c.mesh.position.clone(), grown, shotScale);
         else {
           this.life.hurt(body.c, b.def.dmg);
-          if (b.kind === 'stream') this.splashBlocks(b.def, body.c.mesh.position, body.c, null);
+          if (b.kind === 'stream') this.splashBlocks(grown, body.c.mesh.position, body.c, null);
         }
         stop = true;
       } else if (armed && (hit.solid || grounded)) {
@@ -4532,19 +5266,19 @@ class Game {
           ? ro.clone().addScaledVector(rd, Math.max(0.02, hit.t - 0.02))
           : b.mesh.position.clone();
         b.mesh.position.copy(at);
-        if (b.kind === 'grenade') this.fragBlast(at, b.def);
-        else if (b.kind === 'rocket') this.explode(at, b.def);
+        if (b.kind === 'grenade') this.fragBlast(at, grown, shotScale);
+        else if (b.kind === 'rocket') this.explode(at, grown, shotScale);
         else if (b.kind !== 'burst') {
           const prop = this.propForSolid(hit.solid);
           this.quietFx = true;
           if (prop) this.world.applyHit(prop, b.def.dmg, at);
-          if (b.kind === 'stream') this.splashBlocks(b.def, at, null, prop);
+          if (b.kind === 'stream') this.splashBlocks(grown, at, null, prop);
           this.quietFx = false;
         }
         stop = true;
       } else if (b.life <= 0 || b.mesh.position.y < -2) {
-        if (b.kind === 'grenade') this.fragBlast(b.mesh.position.clone(), b.def);
-        else if (b.kind === 'rocket') this.explode(b.mesh.position.clone(), b.def);
+        if (b.kind === 'grenade') this.fragBlast(b.mesh.position.clone(), grown, shotScale);
+        else if (b.kind === 'rocket') this.explode(b.mesh.position.clone(), grown, shotScale);
         stop = true;
       }
       if (stop) {
@@ -4554,15 +5288,132 @@ class Game {
     }
   }
 
+  /* One tiny builder voxel per pop. Fixed pool — impacts go back on the shelf. */
+  takeEruptBrick() {
+    const ERUPT_MAX = 12;
+    if (!this._eruptMats) this._eruptMats = RAINBOW.map((hex) => mkMat(hex));
+    let mesh = null;
+    for (const m of this._eruptPool) {
+      if (!m.visible) { mesh = m; break; }
+    }
+    if (!mesh) {
+      if (this._eruptPool.length >= ERUPT_MAX) return null;
+      mesh = new THREE.Mesh(BR, this._eruptMats[0]);
+      mesh.scale.setScalar(0.42);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this._eruptPool.push(mesh);
+    }
+    const i = Math.floor(Math.random() * RAINBOW.length);
+    mesh.material = this._eruptMats[i];
+    mesh.userData.hex = RAINBOW[i];
+    mesh.visible = true;
+    mesh.scale.setScalar(0.42);
+    return mesh;
+  }
+
+  releaseErupt(b) {
+    b.mesh.visible = false;
+    b.mesh.scale.setScalar(0.42);
+  }
+
+  clearEruptions() {
+    if (!this.eruptions) return;
+    for (const b of this.eruptions) this.releaseErupt(b);
+    this.eruptions.length = 0;
+  }
+
+  /* One ground cell under the impact. Instance color only — the cell stays. */
+  paintGroundCell(x, z, hex) {
+    const G = this.world.groundGrid;
+    const mesh = G && G.mesh;
+    if (!mesh || hex == null) return false;
+    const ix = Math.floor((x - G.gx0) / G.P);
+    const iz = Math.floor((z - G.gz0) / G.P);
+    const ci = G.cells.get(`${ix}|${iz}`);
+    if (ci === undefined) return false;
+    const color = this._eruptColor || (this._eruptColor = new THREE.Color());
+    if (!mesh.instanceColor) {
+      const prev = mesh.material;
+      const baseHex = prev && prev.userData && prev.userData.base != null ? prev.userData.base : 0x74c745;
+      color.setHex(baseHex);
+      mesh.material = mkMat(0xffffff);
+      for (let i = 0; i < mesh.count; i++) mesh.setColorAt(i, color);
+      let shared = false;
+      if (prev && this.world._mat) {
+        for (const m of this.world._mat.values()) if (m === prev) { shared = true; break; }
+      }
+      if (prev && prev !== mesh.material && !shared) prev.dispose();
+    }
+    color.setHex(hex);
+    mesh.setColorAt(ci, color);
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    return true;
+  }
+
+  launchEruption(prop) {
+    const mesh = this.takeEruptBrick();
+    if (!mesh) return false;
+    const ang = Math.random() * Math.PI * 2;
+    const out = 5 + Math.random() * 3.2;
+    const up = 6.4 + Math.random() * 2.6;
+    const y = prop.mouthY != null ? prop.mouthY : 5.5;
+    mesh.position.set(prop.cx + 0.5, y, prop.cz + 0.5);
+    mesh.rotation.set(Math.random() * 0.4, Math.random() * Math.PI * 2, Math.random() * 0.4);
+    this.eruptions.push({
+      mesh,
+      hex: mesh.userData.hex,
+      vel: new THREE.Vector3(Math.cos(ang) * out, up, Math.sin(ang) * out),
+      life: 6.5,
+      spin: 4 + Math.random() * 5
+    });
+    return true;
+  }
+
+  updateEruptions(dt) {
+    if (!this.eruptions || !this.world) return;
+    const H = (this.world.half || 40) + 8;
+    for (let i = this.eruptions.length - 1; i >= 0; i--) {
+      const b = this.eruptions[i];
+      b.vel.y -= 18 * dt;
+      b.mesh.position.addScaledVector(b.vel, dt);
+      b.mesh.rotation.x += b.spin * dt;
+      b.mesh.rotation.z += b.spin * 0.65 * dt;
+      b.life -= dt;
+      const p = b.mesh.position;
+      const lost = b.life <= 0 || p.y < -4 || Math.abs(p.x) > H || Math.abs(p.z) > H;
+      let landed = false;
+      if (!lost && b.vel.y < 0 && p.y <= 0.25) landed = this.paintGroundCell(p.x, p.z, b.hex);
+      const missed = !landed && !lost && b.vel.y < 0 && p.y <= 0.02;
+      if (landed || lost || missed) {
+        this.releaseErupt(b);
+        this.eruptions.splice(i, 1);
+      }
+    }
+    if (this.world.inHouse || !this.started) return;
+    const ERUPT_MAX = 12;
+    for (const prop of this.world.props) {
+      if (prop.kind !== 'volcano' || prop.gone) continue;
+      if (prop._eruptT == null) prop._eruptT = 0.15 + Math.random() * 0.7;
+      prop._eruptT -= dt;
+      if (prop._eruptT > 0 || this.eruptions.length >= ERUPT_MAX) continue;
+      if (this.launchEruption(prop)) prop._eruptT = 1.45 + Math.random() * 1.35;
+      else prop._eruptT = 0.4;
+    }
+  }
+
   /* Thrown frag: a ring of bricks and a disk of damage. Center kills, the edge wounds. */
-  fragBlast(at, def) {
+  fragBlast(at, def, scale = 1) {
     sfx.bang();
     const colors = [0x3f6b32, 0xe8402a, 0xffc42e, 0x2f7de1, 0x9b5de5];
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2;
       const dir = new THREE.Vector3(Math.cos(a), 0.28 + (i % 3) * 0.12, Math.sin(a)).normalize();
       this.launchBlock(new THREE.Vector3(at.x, at.y + 0.3, at.z), dir, {
-        speed: 6 + (i % 3), life: 0.42, kind: 'burst', def, color: colors[i % colors.length]
+        speed: 6 + (i % 3), life: 0.42, kind: 'burst', def, color: colors[i % colors.length], scale
       });
     }
     this.quietFx = true;
@@ -4740,11 +5591,18 @@ class Game {
   }
 
   regenerateWorld() {
+    sfx.setCrickets(false);
+    this.hair = null;
+    this.stopGodzilla({ quiet: true });
+    if (this.bonus) this.finishBonus({ quiet: true, restore: false });
+    this.clearFlightRings();
     this.clearSaucer();
     this.clearFlood();
     this.clearChasm();
     this.frosted = false;
+    if (this.player) this.player.restoreLook();
     this.clearBlockShots();
+    this.clearEruptions();
     if (this.life) { this.life.dispose(); }
     if (this.train) { this.train.dispose(); this.train = null; }
     clearState(this.world.opts.size); // mammoth reset: regenerate wipes all damage
@@ -4777,6 +5635,11 @@ class Game {
     this.player.vel.set(0, 0, 0);
     this.orbit.wantDist = 11;
     this.applyOutdoorFog();
+    if (this.player.flying) {
+      this.player.setPropeller(true);
+      sfx.setRotor(true);
+      this.spawnFlightRings();
+    }
     this.spawnCollectibles();
     this.updateHud();
     const p = this.world.preset;
@@ -4785,14 +5648,14 @@ class Game {
       + (extra ? `, ${extra} settlements beyond the village` : '') + ', 1 giant monument', 'good');
   }
 
-  selectSlot(i) {
+  selectSlot(i, announce = true) {
     this.slot = i;
     this.removeMode = i >= BRICKS.length;
     this.slots.forEach((s, j) => s.classList.toggle('active', j === i));
     if (!this.removeMode) this.setGhostDef(BRICKS[i]);
     else voice.speak('Remove bricks');
     if (this.ghost) this.ghost.visible = false;
-    if (!this.removeMode) voice.speak(BRICKS[i].name);
+    if (!this.removeMode && announce) voice.speak(BRICKS[i].name);
   }
 
   start() {
@@ -4905,7 +5768,7 @@ class Game {
       this.orbit.pitch = clamp(this.orbit.pitch + dy * 0.0055, -0.18, 1.32);
       if (this.pointers.size === 2) {
         const d = this.pinchDist();
-        if (this.pinch) this.orbit.wantDist = clamp(this.orbit.wantDist * (this.pinch / d), 4.5, 26);
+        if (this.pinch) this.orbit.wantDist = clamp(this.orbit.wantDist * (this.pinch / d), 4.5, this.zoomLimit());
         this.pinch = d;
       }
     });
@@ -4923,7 +5786,7 @@ class Game {
     c.addEventListener('pointercancel', (e) => this.pointers.delete(e.pointerId));
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.orbit.wantDist = clamp(this.orbit.wantDist + Math.sign(e.deltaY) * 1.3, 4.5, 26);
+      this.orbit.wantDist = clamp(this.orbit.wantDist + Math.sign(e.deltaY) * 1.3, 4.5, this.zoomLimit());
     }, { passive: false });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -5135,8 +5998,8 @@ class Game {
     const bothZoom = zoomOut.down && zoomIn.down;
     if (bothZoom && (zoomOut.edge || zoomIn.edge)) this.resetSmallWorld();
     else if (!bothZoom) {
-      if (zoomOut.down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
-      if (zoomIn.down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
+      if (zoomOut.down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, this.zoomLimit());
+      if (zoomIn.down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, this.zoomLimit());
     }
 
     const confirm = act('confirm');
@@ -5242,7 +6105,7 @@ class Game {
   }
 
   actuate(e) {
-    if (!this.started) return;
+    if (!this.started || this.bonus) return;
     if (this.mode === 'weapon') return; // handled by tryFire on pointerdown
     if (this.mode === 'weather') { this.toast('Pick a weather from the strip below', 'good'); return; }
     const ndc = this.ndc(e.clientX, e.clientY);
@@ -5364,7 +6227,8 @@ class Game {
     const o = this.orbit;
     o.dist += (o.wantDist - o.dist) * Math.min(1, dt * 6);
     const p = this.player.pos;
-    const target = new THREE.Vector3(p.x, p.y + 1.5, p.z);
+    const look = this.player.giant && !this.player.bonusRun ? GIANT_SCALE : 1;
+    const target = new THREE.Vector3(p.x, p.y + 1.5 * look, p.z);
     const dir = new THREE.Vector3(Math.sin(o.yaw) * Math.cos(o.pitch), Math.sin(o.pitch), Math.cos(o.yaw) * Math.cos(o.pitch));
     const want = target.clone().addScaledVector(dir, o.dist);
     const groundY = this.world.surfaceTop(Math.floor(want.x + 0.5), Math.floor(want.z + 0.5), 60);
@@ -5432,7 +6296,7 @@ class Game {
   }
 
   toggleDoor() {
-    if (!this.started) return;
+    if (!this.started || this.bonus) return;
     if (this.world.inHouse) {
       const D = this.world.activeInterior.ref.def;
       if (Math.hypot(this.player.pos.x - D.door.x, this.player.pos.z - D.door.z) >= 1.35) {
@@ -5550,8 +6414,24 @@ class Game {
     const move = { x: fwd.x * -mz + right.x * mx, z: fwd.z * -mz + right.z * mx };
 
     this.player.lookYaw = yaw;
+    this.updateEruptions(dt);
+    if (this.bonus) {
+      this.tickBonus(dt, move);
+      return;
+    }
     this.updateFlood(dt);
     this.player.update(dt, move, this.jumpQueued > 0);
+    this.stomp(dt);
+    if (this.rings && !this.player.flying) this.clearFlightRings();
+    else if (this.player.flying && this.rings) {
+      this.spinFlightRings();
+      this.checkFlightRings();
+    }
+    if (this.bonus) {
+      this.updateCamera(dt);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     DBG.sample();
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.tickWeaponRig(dt);

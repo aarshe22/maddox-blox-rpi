@@ -215,7 +215,7 @@ export function buildOptionsPanel(opts, hooks = {}) {
   for (const t of OBJECT_TYPES) {
     const row = document.createElement('div');
     row.className = 'o-row';
-    row.innerHTML = `<span class="o-name">${t.icon} ${t.label}</span>
+    row.innerHTML = `<span class="o-name"><span class="o-icon">${t.icon}</span><span class="o-label">${t.label}</span></span>
       <input type="range" min="0" max="${t.max}" step="1" aria-label="${t.label} count" />
       <b class="o-val"></b>
       <span class="o-sw"><input type="checkbox" aria-label="${t.label} enabled" /></span>`;
