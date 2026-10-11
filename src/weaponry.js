@@ -20,91 +20,99 @@ export const WEAPONS = [
   { id: 'hair', name: 'Hair', icon: '🧔', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 0.4, kind: 'hair' }
 ];
 
-/* -------------------------------------------------------------------- FX */
-const MAXP = 340;
+/* A few boxes wearing a blocky see-through texture. Frames only change
+   scale and position. Rain and snow stay in weather.js. */
+const FX_SLOTS = 8;
+const FX_SCALES = [0.7, 1.5, 2.3, 2.9];
+const FX_COLOR = { smoke: 0x9a9690, fire: 0xff7a18, debris: 0xe8402a, spark: 0xffe14a };
+const CRUDE = new THREE.BoxGeometry(1, 1, 1);
+let chunkTex = null;
+
+function chunkTexture() {
+  if (chunkTex) return chunkTex;
+  const s = 16;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      if ((x + y * 2) % 5 === 0) continue;
+      if (x % 4 === 0 && y % 3 === 0) continue;
+      const a = 0.42 + ((x + y) % 3) * 0.18;
+      g.fillStyle = `rgba(255,255,255,${a})`;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  chunkTex = new THREE.CanvasTexture(c);
+  chunkTex.magFilter = THREE.NearestFilter;
+  chunkTex.minFilter = THREE.NearestFilter;
+  chunkTex.colorSpace = THREE.SRGBColorSpace;
+  chunkTex.needsUpdate = true;
+  return chunkTex;
+}
+
+export function voxelBox(color) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: chunkTexture(),
+    color,
+    transparent: true,
+    depthWrite: false,
+    alphaTest: 0.2
+  });
+  const mesh = new THREE.Mesh(CRUDE, mat);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
 export class Fx {
   constructor(scene) {
-    this.pos = new Float32Array(MAXP * 3);
-    this.col = new Float32Array(MAXP * 3);
-    this.vel = new Float32Array(MAXP * 3);
-    this.life = new Float32Array(MAXP);
-    this.maxLife = new Float32Array(MAXP);
-    this.baseSize = new Float32Array(MAXP);
-    this.grav = new Float32Array(MAXP);
-    this.head = 0;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
-    geo.setAttribute('size', new THREE.BufferAttribute(new Float32Array(MAXP), 1));
-    this.sizeArr = geo.attributes.size.array;
-    const c = document.createElement('canvas');
-    c.width = c.height = 64;
-    const g = c.getContext('2d');
-    const rg = g.createRadialGradient(32, 32, 2, 32, 32, 31);
-    rg.addColorStop(0, 'rgba(255,255,255,1)');
-    rg.addColorStop(0.55, 'rgba(255,255,255,0.5)');
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
-    this.mat = new THREE.PointsMaterial({
-      size: 1, map: new THREE.CanvasTexture(c), vertexColors: true, transparent: true,
-      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
-    });
-    this.points = new THREE.Points(geo, this.mat);
-    this.points.frustumCulled = false;
-    scene.add(this.points);
-    this.geo = geo;
-  }
-  spawn(x, y, z, kind, n = 6) {
-    const r = Math.random;
-    for (let k = 0; k < n; k++) {
-      const i = this.head; this.head = (this.head + 1) % MAXP;
-      const i3 = i * 3;
-      this.pos[i3] = x; this.pos[i3 + 1] = y; this.pos[i3 + 2] = z;
-      if (kind === 'smoke') {
-        this.vel[i3] = (r() - 0.5) * 0.9; this.vel[i3 + 1] = 0.9 + r() * 1.3; this.vel[i3 + 2] = (r() - 0.5) * 0.9;
-        const g = 0.3 + r() * 0.3; this.col[i3] = g; this.col[i3 + 1] = g; this.col[i3 + 2] = g;
-        this.life[i] = this.maxLife[i] = 1.1 + r() * 0.9; this.baseSize[i] = 0.5 + r() * 0.6; this.grav[i] = 1.3;
-      } else if (kind === 'fire') {
-        this.vel[i3] = (r() - 0.5) * 1.8; this.vel[i3 + 1] = 1.5 + r() * 1.8; this.vel[i3 + 2] = (r() - 0.5) * 1.8;
-        this.col[i3] = 1; this.col[i3 + 1] = 0.4 + r() * 0.4; this.col[i3 + 2] = 0.08;
-        this.life[i] = this.maxLife[i] = 0.28 + r() * 0.3; this.baseSize[i] = 0.4 + r() * 0.45; this.grav[i] = 2.4;
-      } else if (kind === 'debris') {
-        const a = r() * Math.PI * 2, sp = 2 + r() * 4;
-        this.vel[i3] = Math.cos(a) * sp; this.vel[i3 + 1] = 3 + r() * 4.5; this.vel[i3 + 2] = Math.sin(a) * sp;
-        const c = r() * 0.45; this.col[i3] = 0.75 + c; this.col[i3 + 1] = 0.6 + c; this.col[i3 + 2] = 0.4 + c;
-        this.life[i] = this.maxLife[i] = 0.7 + r() * 0.5; this.baseSize[i] = 0.18 + r() * 0.14; this.grav[i] = -9.5;
-      } else { // spark / muzzle flash
-        this.vel[i3] = (r() - 0.5) * 2.5; this.vel[i3 + 1] = (r() - 0.5) * 2.5; this.vel[i3 + 2] = (r() - 0.5) * 2.5;
-        this.col[i3] = 1; this.col[i3 + 1] = 0.8; this.col[i3 + 2] = 0.3;
-        this.life[i] = this.maxLife[i] = 0.16 + r() * 0.12; this.baseSize[i] = 0.3 + r() * 0.25; this.grav[i] = 0;
-      }
-      this.sizeArr[i] = this.baseSize[i];
+    this.slots = [];
+    this.cursor = 0;
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    for (let i = 0; i < FX_SLOTS; i++) {
+      const mesh = voxelBox(0xffffff);
+      mesh.visible = false;
+      this.group.add(mesh);
+      this.slots.push({ on: false, t: 0, frame: -1, mesh, y: 0, kind: 'debris' });
     }
   }
+
+  spawn(x, y, z, kind) {
+    let si = this.slots.findIndex((s) => !s.on);
+    if (si < 0) si = this.cursor;
+    this.cursor = (si + 1) % FX_SLOTS;
+    const slot = this.slots[si];
+    const name = FX_COLOR[kind] ? kind : 'spark';
+    slot.on = true;
+    slot.t = 0;
+    slot.frame = 0;
+    slot.y = y;
+    slot.kind = name;
+    slot.mesh.material.color.setHex(FX_COLOR[name]);
+    slot.mesh.position.set(x, y, z);
+    slot.mesh.scale.setScalar(FX_SCALES[0]);
+    slot.mesh.visible = true;
+  }
+
   update(dt) {
-    let live = 0;
-    for (let i = 0; i < MAXP; i++) {
-      if (this.life[i] <= 0) { this.sizeArr[i] = 0; continue; }
-      live++;
-      const i3 = i * 3;
-      this.life[i] -= dt;
-      const f = clamp(this.life[i] / this.maxLife[i], 0, 1);
-      this.vel[i3 + 1] += this.grav[i] * dt;
-      this.pos[i3] += this.vel[i3] * dt;
-      this.pos[i3 + 1] += this.vel[i3 + 1] * dt;
-      this.pos[i3 + 2] += this.vel[i3 + 2] * dt;
-      if (this.grav[i] < 0 && this.pos[i3 + 1] < 0.06) {
-        this.pos[i3 + 1] = 0.06; this.vel[i3 + 1] *= -0.3; this.vel[i3] *= 0.55; this.vel[i3 + 2] *= 0.55;
+    for (const slot of this.slots) {
+      if (!slot.on) continue;
+      slot.t += dt;
+      const idx = Math.min(FX_SCALES.length - 1, Math.floor(slot.t / 0.09));
+      if (idx !== slot.frame) {
+        slot.frame = idx;
+        const lift = slot.kind === 'smoke' ? 0.55 : slot.kind === 'fire' ? 0.35 : 0.08;
+        slot.mesh.scale.setScalar(FX_SCALES[idx] * (slot.kind === 'spark' ? 0.65 : 1));
+        slot.mesh.position.y = slot.y + idx * lift;
       }
-      // smoke/fire expand as they fade; debris/sparks shrink
-      this.sizeArr[i] = this.grav[i] > 0
-        ? this.baseSize[i] * (1.9 - f)
-        : Math.max(0.001, this.baseSize[i] * f);
-    }
-    this.points.visible = live > 0;
-    if (live) {
-      const a = this.geo.attributes;
-      a.position.needsUpdate = a.color.needsUpdate = a.size.needsUpdate = true;
+      if (slot.t > 0.42) {
+        slot.on = false;
+        slot.frame = -1;
+        slot.mesh.visible = false;
+      }
     }
   }
 }

@@ -4,7 +4,7 @@ import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addB
 import { makeInterior } from './interior.js';
 import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=12';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
-import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js?v=14';
+import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
 import { voice } from './voice.js?v=1';
 import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=1';
@@ -515,23 +515,62 @@ class World {
     p._scorched = true;
   }
 
-  /* Apply the visual state for a damage stage: darken what is left and shed
-     parts from the top down. A full destroy leaves one flat black ground mark. */
+  /* Stages 1–3 are one translucent box climbing the building. Stage 4
+     removes the meshes and leaves a low rubble box plus the scorch mark. */
+  poseHurt(p, stage) {
+    if (stage <= 0) {
+      if (p.hurtShell) p.hurtShell.visible = false;
+      return;
+    }
+    if (!p.hurtShell) {
+      p.hurtShell = voxelBox(0x6a5a48);
+      this.addObj(p.hurtShell);
+    }
+    const box = p.kind === 'tree' ? this.treeBounds(p) : this.propBox(p);
+    const w = Math.max(1.2, box.max.x - box.min.x);
+    const h = Math.max(1.2, box.max.y - box.min.y);
+    const d = Math.max(1.2, box.max.z - box.min.z);
+    const cx = (box.min.x + box.max.x) * 0.5;
+    const cz = (box.min.z + box.max.z) * 0.5;
+    const shell = p.hurtShell;
+    const colors = p.kind === 'tree'
+      ? [0x5a6a32, 0x6a4a28, 0x3a2a1c, 0x1a1816]
+      : [0x6a5a48, 0x4a4036, 0x2e2a26, 0x1a1816];
+    shell.material.color.setHex(colors[stage - 1]);
+    shell.visible = true;
+    if (stage >= 4) {
+      if (p.kind === 'tree') {
+        shell.scale.set(1.15, 0.7, 1.15);
+        shell.position.set(p.cx, 0.35, p.cz);
+      } else {
+        shell.scale.set(w * 0.92, 0.55, d * 0.92);
+        shell.position.set(cx, 0.28, cz);
+      }
+      return;
+    }
+    const cover = [0.35, 0.6, 0.88][stage - 1];
+    shell.scale.set(w * (0.72 + cover * 0.28), h * cover, d * (0.72 + cover * 0.28));
+    shell.position.set(cx, box.min.y + shell.scale.y * 0.5, cz);
+  }
+
+  treeBounds(p) {
+    if (p._treeBox) return p._treeBox;
+    const box = new THREE.Box3();
+    for (const pt of p.parts) {
+      if (pt.mesh) box.union(new THREE.Box3().setFromObject(pt.mesh));
+    }
+    p._treeBox = box.isEmpty() ? this.propBox(p) : box;
+    return p._treeBox;
+  }
+
   setStage(p, stage) {
     if (p.stage === stage) return;
     p.stage = stage;
-    const parts = p.parts;
-    const lost = Math.min(Math.max(0, parts.length - 1), Math.round((stage / 4) * parts.length));
-    for (let j = 0; j < parts.length; j++) {
-      const pt = parts[parts.length - 1 - j];
-      if (j < lost) {
-        this.hidePart(pt);
-      } else if (pt.mesh.material && pt.mesh.material.color && !pt.mesh.userData.keepMat) {
-        if (pt.hex === undefined) pt.hex = colorOfMat(pt.mesh.material);
-        pt.mesh.material = this.wornMat(pt.hex, stage);
-      }
+    this.poseHurt(p, stage);
+    if (stage >= 4) {
+      for (const pt of p.parts) this.hidePart(pt);
+      this.markScorch(p);
     }
-    if (stage >= 4) this.markScorch(p);
   }
 
   applyHit(p, amount, pt) {
@@ -882,23 +921,23 @@ class World {
     G.mesh.instanceMatrix.needsUpdate = true;
 
     // cut terrain slabs: subtract (cellRect x [-d..0]) from flagged solids
-    const charMat = mkMat(0x3a2c22, { roughness: 1 });
-    const capParts = [], rimParts = [];
+    const coreParts = [], midParts = [], lipParts = [];
     for (const [, , , x, z, d] of cellKeys) {
       const cut = new THREE.Box3(
         new THREE.Vector3(x - P / 2, -d, z - P / 2),
         new THREE.Vector3(x + P / 2, 0.01, z + P / 2)
       );
       this._subSolidFrom(cut);
-      addBox(capParts, P, 0.08, P, x, -d + 0.04, z);
-      if (Math.hypot(x - cx, z - cz) > radius * 0.72) {
-        addBox(rimParts, P, 0.24, P, x, 0.12, z);   // scorched lip at surface
-      }
+      const dn = Math.hypot(x - cx, z - cz) / radius;
+      if (dn > 0.72) addBox(lipParts, P * 0.78, 0.85, P * 0.78, x, 0.15, z);
+      else if (dn > 0.38) addBox(midParts, P * 0.78, 0.5, P * 0.78, x, -d + 0.06, z);
+      else addBox(coreParts, P * 0.78, 0.5, P * 0.78, x, -d + 0.06, z);
     }
-    // charred pit floor / scorch ring are visuals only: the terrain slab cut
-    // left >=0.3 of slab under every pit cell, so the slab bottom is the floor
-    if (capParts.length) this.addObj(merged(capParts, charMat));
-    if (rimParts.length) this.addObj(merged(rimParts, charMat));
+    // Scorched voxel pavers are visuals only: the terrain slab cut left a
+    // walkable floor under every pit cell.
+    if (coreParts.length) this.addObj(merged(coreParts, mkMat(0x241810)));
+    if (midParts.length) this.addObj(merged(midParts, mkMat(0x4a3424)));
+    if (lipParts.length) this.addObj(merged(lipParts, mkMat(0x6a4a30)));
     for (const [, , , x, z, d] of cellKeys) this.groundGrid.carved.set(`${Math.round(x)}|${Math.round(z)}`, d);
   }
 
@@ -3254,8 +3293,16 @@ class Game {
   defuseNuke() {
     const n = this.nuke;
     if (!n) return;
-    for (const k of ['mesh', 'cloud', 'crater']) if (n[k]) this.scene.remove(n[k]);
+    if (n.mesh) this.dropBomb(n.mesh);
+    if (n.cloud) this.dropCloud(n);
     this.nuke = null;
+    if (this.flash) this.flash.intensity = 0;
+    if (this.flashWash) this.flashWash.style.opacity = '0';
+  }
+
+  dropBomb(bomb) {
+    this.scene.remove(bomb);
+    bomb.traverse((o) => { if (o.material) o.material.dispose(); });
   }
 
   refreshStrips() {
@@ -3886,7 +3933,7 @@ class Game {
     this.clearBolt();
     this.storm = null;
     this.stormFlash = null;
-    if (this.flashWash && !(this.nuke && this.nuke.stage === 'flash')) this.flashWash.style.opacity = '0';
+    if (this.flashWash && !(this.nuke && this.nuke.stage === 'cloud' && this.nuke.t < 0.5)) this.flashWash.style.opacity = '0';
     if (this.mode !== 'weather') this.setMode('weather');
     sfx.unloopAll();
     sfx.setCrickets(def.id === 'night');
@@ -3976,15 +4023,9 @@ class Game {
   }
 
   onPropDamage(p, amount, pt) {
-    const at = pt || new THREE.Vector3(p.cx, 1.5, p.cz);
-    if (!this.quietFx) this.fx.spawn(at.x, at.y, at.z, 'smoke', 4);
     sfx.crack();
     if (p.gone) {
       sfx.destroy();
-      if (!this.quietFx) {
-        this.fx.spawn(at.x, at.y, at.z, 'debris', 16);
-        this.fx.spawn(at.x, at.y + 1, at.z, 'smoke', 10);
-      }
       for (const q of p.parts) {
         if (q.hidden) continue;
         q.hidden = true;
@@ -4679,7 +4720,7 @@ class Game {
     const pulses = [0, 0.07, 0.15, 0.26];
     let on = false;
     for (const p of pulses) if (f.t >= p && f.t < p + 0.04) on = true;
-    const nukeFlash = this.nuke && this.nuke.stage === 'flash';
+    const nukeFlash = this.nuke && this.nuke.stage === 'cloud' && this.nuke.t < 0.5;
     if (this.flashWash && !nukeFlash) {
       this.flashWash.style.background = f.t < 0.1 ? '#f7fbff' : '#fff';
       this.flashWash.style.opacity = on ? '0.88' : (f.t < 0.36 ? '0.14' : '0');
@@ -4915,29 +4956,87 @@ class Game {
       const gTop = gy > -Infinity ? gy : 0;
       if (n.t > 6 || n.mesh.position.y <= gTop + 2) {
         n.mesh.position.y = gTop + 2;
+        this.dropBomb(n.mesh);
+        n.mesh = null;
         this._nukeBlast(n, gTop);
-        n.stage = 'flash'; n.t = 0;
+        n.cloud = this.spawnMushroom(n.tx, gTop, n.tz);
+        n.frames = this.mushroomFrames();
+        n.frame = -1;
+        n.stage = 'cloud';
+        n.t = 0;
       }
       return;
     }
-    if (n.stage === 'flash') {
-      const hex = [0xffffff, 0xffe14a, 0xff5a1f, 0xff2d55, 0x7dff6a, 0x7ec8ff];
-      const css = ['#fff', '#ffe14a', '#ff5a1f', '#ff2d55', '#7dff6a', '#7ec8ff'];
-      const i = Math.floor(n.t * 9) % hex.length;
-      this.flash.color.setHex(hex[i]);
-      this.flash.position.set(n.tx, 28, n.tz);
-      this.flash.intensity = 90 + 160 * Math.abs(Math.sin(n.t * 18));
-      if (this.flashWash) {
-        this.flashWash.style.background = css[i];
-        const fade = n.t < 2.2 ? 0.62 : Math.max(0, 0.62 - (n.t - 2.2));
-        this.flashWash.style.opacity = String(fade);
+    if (n.stage === 'cloud') {
+      const frameDur = 0.2;
+      const idx = Math.min(n.frames.length - 1, Math.floor(n.t / frameDur));
+      if (idx !== n.frame) {
+        n.frame = idx;
+        this.poseCloud(n.cloud, n.frames[idx]);
       }
-      if (n.t > 3.1) {
-        n.stage = 'done';
+      if (n.t < 0.4) {
+        this.flash.color.setHex(0xfff6d0);
+        this.flash.position.set(n.tx, (n.gTop || 0) + 8, n.tz);
+        this.flash.intensity = 70 * (1 - n.t / 0.4);
+        if (this.flashWash) {
+          this.flashWash.style.background = '#fff6d0';
+          this.flashWash.style.opacity = String(0.55 * (1 - n.t / 0.4));
+        }
+      } else if (this.flash.intensity) {
         this.flash.intensity = 0;
         if (this.flashWash) this.flashWash.style.opacity = '0';
       }
+      if (n.t > n.frames.length * frameDur + 1.3) {
+        this.dropCloud(n);
+        n.stage = 'done';
+      }
     }
+  }
+
+  /* Stem, cap, and skirt. Each step only rescales those three boxes. */
+  mushroomFrames() {
+    const box = (w, h, y) => (w ? { w, h, y } : null);
+    return [
+      { stem: box(5.2, 4.2, 2.1), cap: null, skirt: null },
+      { stem: box(7.4, 6.6, 3.3), cap: null, skirt: null },
+      { stem: box(4.2, 10, 5), cap: box(6.4, 3.2, 11.2), skirt: null },
+      { stem: box(3.4, 14, 7), cap: box(8.2, 3.4, 15.2), skirt: null },
+      { stem: box(3, 16, 8), cap: box(12, 3.6, 17.4), skirt: box(14, 2.2, 15.2) },
+      { stem: box(2.6, 18, 9), cap: box(16, 4, 19.6), skirt: box(20, 2.4, 16.8) },
+      { stem: box(2.4, 19, 9.5), cap: box(20, 4.2, 21.2), skirt: box(24, 2.6, 18) },
+      { stem: box(2.2, 18, 9), cap: box(22, 4, 21.6), skirt: box(26, 2.4, 18.2) }
+    ];
+  }
+
+  spawnMushroom(x, gTop, z) {
+    const g = new THREE.Group();
+    g.position.set(x, gTop || 0, z);
+    g.add(voxelBox(0xff7a18));
+    g.add(voxelBox(0xd9d4cc));
+    g.add(voxelBox(0x5c5854));
+    g.children.forEach((m) => { m.visible = false; });
+    this.scene.add(g);
+    return g;
+  }
+
+  poseCloud(group, pose) {
+    if (!group || !pose) return;
+    const parts = [pose.stem, pose.cap, pose.skirt];
+    group.children.forEach((mesh, i) => {
+      const p = parts[i];
+      if (!p) { mesh.visible = false; return; }
+      mesh.visible = true;
+      mesh.scale.set(p.w, p.h, p.w);
+      mesh.position.set(0, p.y, 0);
+    });
+  }
+
+  dropCloud(n) {
+    const group = n && n.cloud;
+    if (!group) return;
+    this.scene.remove(group);
+    group.traverse((o) => { if (o.material) o.material.dispose(); });
+    n.cloud = null;
   }
 
   _nukeBlast(n, gTop) {
@@ -5009,7 +5108,7 @@ class Game {
     if (def.id === 'snow') this.snowf.update(dt, p.x, p.z, -1.6, Math.sin(this.weatherT * 0.4) * 1.2);
     if (this.boltT > 0) { this.boltT -= dt; this.bolt.visible = this.boltT > 0; }
     this.updateStorm(dt);
-    if (this.flash.intensity > 0 && !(this.nuke && this.nuke.stage === 'flash') && !this.stormFlash) {
+    if (this.flash.intensity > 0 && !(this.nuke && this.nuke.stage === 'cloud' && this.nuke.t < 0.5) && !this.stormFlash) {
       this.flash.intensity = Math.max(0, this.flash.intensity - dt * 40);
     }
 
@@ -5591,6 +5690,7 @@ class Game {
   }
 
   regenerateWorld() {
+    this.defuseNuke();
     sfx.setCrickets(false);
     this.hair = null;
     this.stopGodzilla({ quiet: true });
