@@ -22,10 +22,14 @@ export const OBJECT_TYPES = [
    trees/flowers are absolute count multipliers, spots scale the collectible
    budget (40 * spots). */
 export const SIZES = [
-  { id: 'tiny', label: 'Tiny', half: 44, towns: 0, rural: 0, farms: 0, spots: 0.9, trees: 0.6, flowers: 1.2, zones: 1, train: 0 },
-  { id: 'small', label: 'Small', half: 60, towns: 2, rural: 2, farms: 3, spots: 1.8, trees: 2.0, flowers: 2.5, zones: 3, train: 0 },
-  { id: 'large', label: 'Large', half: 96, towns: 5, rural: 5, farms: 7, spots: 3.0, trees: 4.0, flowers: 4.2, zones: 5, train: 1 },
-  { id: 'huge', label: 'Huge', half: 144, towns: 10, rural: 8, farms: 12, spots: 4.4, trees: 7.0, flowers: 6.5, zones: 6, train: 1 }
+  { id: 'tiny', label: 'Tiny', half: 44, towns: 0, rural: 0, farms: 0, spots: 0.9, trees: 0.6, flowers: 1.2, zones: 1, train: 0,
+    counts: { house: 3, school: 1, church: 0, store: 0, playground: 1, mountain: 1, volcano: 0, tree: 8, flower: 12, deco: 0 } },
+  { id: 'small', label: 'Small', half: 60, towns: 2, rural: 2, farms: 3, spots: 1.8, trees: 2.0, flowers: 2.5, zones: 3, train: 0,
+    counts: { house: 5, school: 1, church: 1, store: 1, playground: 1, mountain: 2, volcano: 0, tree: 16, flower: 22, deco: 0 } },
+  { id: 'large', label: 'Large', half: 96, towns: 5, rural: 5, farms: 7, spots: 3.0, trees: 4.0, flowers: 4.2, zones: 5, train: 1,
+    counts: { house: 8, school: 1, church: 1, store: 2, playground: 2, mountain: 3, volcano: 1, tree: 28, flower: 36, deco: 0 } },
+  { id: 'huge', label: 'Huge', half: 144, towns: 10, rural: 8, farms: 12, spots: 4.4, trees: 7.0, flowers: 6.5, zones: 6, train: 1,
+    counts: { house: 12, school: 2, church: 2, store: 2, playground: 3, mountain: 4, volcano: 1, tree: 42, flower: 52, deco: 1 } }
 ];
 const MAX_HALF = 160; // hard cap: runaway-memory guard for map size
 
@@ -51,9 +55,21 @@ export function sizePreset(id) {
   return SIZES.find((x) => x.id === id) || SIZES[1];
 }
 
-export function defaultOptions() {
+/* Slider defaults for one map size. The number on the slider is the number built. */
+export function countsForSize(id) {
+  const s = sizePreset(id);
   const counts = {}, enabled = {};
-  for (const t of OBJECT_TYPES) { counts[t.id] = t.def; enabled[t.id] = t.def > 0; }
+  for (const t of OBJECT_TYPES) {
+    const n = s.counts && typeof s.counts[t.id] === 'number' ? s.counts[t.id] : t.def;
+    counts[t.id] = Math.max(0, Math.min(t.max, Math.round(n)));
+    enabled[t.id] = counts[t.id] > 0;
+  }
+  return { counts, enabled };
+}
+
+export function defaultOptions() {
+  const base = countsForSize('tiny');
+  const counts = base.counts, enabled = base.enabled;
   return {
     size: 'tiny',
     counts,
@@ -250,7 +266,14 @@ export function buildOptionsPanel(opts, hooks = {}) {
 
   const segs = [...el.querySelectorAll('.o-size button')];
   const syncSegs = () => segs.forEach((b) => b.classList.toggle('active', b.dataset.size === opts.size));
-  for (const b of segs) b.addEventListener('click', () => { opts.size = b.dataset.size; syncSegs(); });
+  for (const b of segs) b.addEventListener('click', () => {
+    opts.size = b.dataset.size;
+    const next = countsForSize(opts.size);
+    opts.counts = next.counts;
+    opts.enabled = next.enabled;
+    syncSegs();
+    for (const s of syncers) s();
+  });
 
   const resBtns = [...el.querySelectorAll('.o-res button')];
   const syncRes = () => resBtns.forEach((b) => b.classList.toggle('active', b.dataset.res === (opts.resolution || 'low')));

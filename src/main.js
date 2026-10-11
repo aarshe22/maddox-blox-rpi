@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=13';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=14';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
 import { voice } from './voice.js?v=1';
-import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=2';
+import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=3';
 import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js';
 import { sigOf, getState, setState, clearState } from './persist.js';
@@ -286,9 +286,7 @@ class World {
   count(id) {
     const o = this.opts;
     if (!o.enabled[id]) return 0;
-    const mult = id === 'tree' ? this.preset.trees
-      : id === 'flower' ? (this.preset.flowers ?? this.preset.zones * 0.6) : 1;
-    return Math.max(0, Math.min(Math.round((o.counts[id] || 0) * mult), 900));
+    return Math.max(0, Math.min(Math.round(o.counts[id] || 0), 900));
   }
 
   addObj(obj) { this._b.group.add(obj); return obj; }

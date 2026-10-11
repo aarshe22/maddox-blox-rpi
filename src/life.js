@@ -321,6 +321,54 @@ export class Life {
     return top > -Infinity ? top : 0;
   }
 
+  /* Feet height on the map itself: terrain, roads, and the plaza. Building
+     roofs are taller than this and are not a place to stand. */
+  feetY(x, z) {
+    let top = -Infinity;
+    for (const s of this.world.solids) {
+      if (s.disabled) continue;
+      const b = s.box;
+      if (b.max.y > 1.55 || b.max.y < -1.5) continue;
+      if (x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z && b.max.y > top) top = b.max.y;
+    }
+    return top > -Infinity ? top : 0;
+  }
+
+  roofed(x, z) {
+    for (const s of this.world.solids) {
+      if (s.disabled) continue;
+      const b = s.box;
+      if (b.max.y <= 1.55) continue;
+      if (x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z) return true;
+    }
+    return false;
+  }
+
+  /* A point on open ground inside the map, beside buildings rather than on them. */
+  clearSpot(x, z) {
+    const H = this.world.half - 3;
+    const tryAt = (px, pz) => {
+      px = clamp(px, -H, H);
+      pz = clamp(pz, -H, H);
+      if (this.world.inRiver(px, pz) || this.roofed(px, pz)) return null;
+      const y = this.feetY(px, pz);
+      if (Math.abs(px) > this.world.half - 1 || Math.abs(pz) > this.world.half - 1) return null;
+      return { x: px, z: pz, y };
+    };
+    let hit = tryAt(x, z);
+    if (hit) return hit;
+    for (let ring = 1; ring <= 8; ring++) {
+      const r = ring * 1.6;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + ring;
+        hit = tryAt(x + Math.cos(a) * r, z + Math.sin(a) * r);
+        if (hit) return hit;
+      }
+    }
+    const fallback = tryAt(x, z) || { x: clamp(x, -H, H), z: clamp(z, -H, H), y: 0 };
+    return fallback;
+  }
+
   _spawn(kind, x, z, homeR, opts) {
     const life = (this.world.opts && this.world.opts.life) || {};
     if (life.animals === false && (kind === 'cow' || kind === 'chicken' || kind === 'dog' || kind === 'cat')) return null;
@@ -328,7 +376,12 @@ export class Life {
     if (life.balloons === false && kind === 'balloon') return null;
     const H = this.world.half - 3;
     x = clamp(x, -H, H); z = clamp(z, -H, H);
-    const gy = this.ground(x, z);
+    const onFoot = kind === 'person' || kind === 'cow' || kind === 'chicken' || kind === 'dog' || kind === 'cat';
+    let gy;
+    if (onFoot) {
+      const spot = this.clearSpot(x, z);
+      x = spot.x; z = spot.z; gy = spot.y;
+    } else gy = this.ground(x, z);
     const mesh = MAKERS[kind](this.rand, opts || {});
     const vital = VITALS[kind];
     if (vital) mesh.scale.setScalar((kind === 'person' ? PLAYER_H : ANIMAL_H) / vital.h);
@@ -740,7 +793,7 @@ export class Life {
     const h = c.kind === 'person' ? 2.13 : 1.05;
     const bob = Math.sin(c.t * 2.4 + c.yaw) * 0.07;
     const floatY = w.floodY - h * 0.5 + bob;
-    const gy = this.ground(m.position.x, m.position.z);
+    const gy = this.feetY(m.position.x, m.position.z);
     const floor = Math.max(gy, floatY);
     m.position.y += (floor - m.position.y) * Math.min(1, dt * 2.4);
     const sw = Math.sin(c.t * 6) * 0.7;
@@ -928,7 +981,7 @@ export class Life {
       }
       m.rotation.y = c.yaw;
       m.rotation.x = 0;
-      const gy = this.ground(m.position.x, m.position.z);
+      const gy = this.feetY(m.position.x, m.position.z);
       const hover = c.monster === 'ghost' ? 1.2 + Math.sin(c.t * 2.2) * 0.28 : 0;
       m.position.y += (gy + hover - m.position.y) * Math.min(1, dt * 9);
       const sw = Math.sin(c.walk * 7) * (c.walk > 0.05 ? 0.45 : 0.03);
