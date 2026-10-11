@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
 <link rel="stylesheet" href="src/styles.css?v=18" />
-<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.8.2/dist/es-module-shims.js"></script>
+
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -183,31 +183,29 @@ try {
 </div>
 
 <script>
-/* Safari 15 interim loader: pinned 1.8.2 polyfill, import map installed before shimmed game startup. */
 (function () {
-  if (location.protocol === 'file:') return;
-  var localThree = './node_modules/three/build/three.module.js';
-  var localAddons = './node_modules/three/examples/jsm/';
-  var cdnThree = 'https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js';
-  var cdnAddons = 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/';
   var nativeMaps = !!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
-  function note(k,m){ if(window.MB_BOOT) MB_BOOT.add(k,m); }
-  async function localThreeExists() {
-    try { var head=await fetch(localThree,{method:'HEAD',cache:'no-store'}); if(head.ok)return true; } catch(e){ note('LOCAL THREE HEAD',e); }
-    try { var got=await fetch(localThree,{headers:{Range:'bytes=0-0'},cache:'no-store'}); return got.ok||got.status===206; } catch(e){ note('LOCAL THREE GET',e); return false; }
+  if (!nativeMaps) {
+    if (window.MB_BOOT) MB_BOOT.add('LOADER','Safari compatibility path: static declarative shim');
+    var map = document.createElement('script');
+    map.type = 'importmap-shim';
+    map.textContent = JSON.stringify({imports:{
+      three:'https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js',
+      'three/addons/':'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/'
+    }});
+    document.head.appendChild(map);
   }
-  function mapFor(three,addons,type){ var map=document.createElement('script'); map.type=type; map.textContent=JSON.stringify({imports:{three:three,'three/addons/':addons}}); document.head.appendChild(map); }
-  async function waitForShim(){ for(var i=0;i<100;i++){ if(typeof window.importShim==='function')return; await new Promise(function(r){setTimeout(r,50);}); } throw new Error('es-module-shims did not initialize within 5 seconds'); }
-  (async function(){
-    try {
-      var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
-      note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
-      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=62'); }
-      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); note('LOADER','declarative shim import map registered'); var app=document.createElement('script'); app.type='module-shim'; app.src='./src/main.js?v=62'; app.addEventListener('error',function(e){ if(window.MB_BOOT) MB_BOOT.fail(e && e.error ? e.error : new Error('module-shim failed to load')); }); document.body.appendChild(app); }
-      if(window.MB_BOOT) MB_BOOT.ready();
-    } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
-  })();
 })();
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.8.2/dist/es-module-shims.js"></script>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+</script>
+<script type="module-shim" src="./src/main.js?v=63"></script>
+<script type="module">
+if (window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap')) {
+  import('./src/main.js?v=63').catch(function(e){ if(window.MB_BOOT) MB_BOOT.fail(e); });
+}
 </script>
 <script>
 /* A file:// page cannot load the module above. Say so on the title screen. */
