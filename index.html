@@ -202,8 +202,8 @@ try {
     try {
       var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
       note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
-      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=60'); }
-      else { await waitForShim(); await window.importShim.addImportMap({ imports: { three: three, 'three/addons/': addons } }); note('LOADER','shim import map registered'); await window.importShim('./src/main.js?v=60'); }
+      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=61'); }
+      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); note('LOADER','declarative shim import map registered'); var app=document.createElement('script'); app.type='module-shim'; app.src='./src/main.js?v=61'; app.addEventListener('error',function(e){ if(window.MB_BOOT) MB_BOOT.fail(e && e.error ? e.error : new Error('module-shim failed to load')); }); document.body.appendChild(app); }
       if(window.MB_BOOT) MB_BOOT.ready();
     } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
   })();
