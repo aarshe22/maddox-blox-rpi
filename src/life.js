@@ -427,33 +427,33 @@ export class Life {
     return this.counts();
   }
 
-  /* Turn every person figure already in the world, then the animals. No new creatures. */
+  /* Every person, animal, driver, and interior figure becomes one of the five monsters. */
   hauntPeople(extraRoots = []) {
-    const people = ['zombie', 'ghost', 'skeleton'];
-    const animals = ['bat', 'snake'];
-    let pi = 0, ai = 0, n = 0;
-    const turn = (group) => {
-      if (!group || group.userData.monster) return false;
-      this.paintMonster(group, people[pi++ % people.length]);
+    const forms = ['ghost', 'zombie', 'skeleton', 'snake', 'bat'];
+    const seen = new Set();
+    let i = 0, n = 0;
+    const apply = (group, creature) => {
+      if (!group || seen.has(group) || group.userData.monster) return false;
+      seen.add(group);
+      const form = forms[i++ % forms.length];
+      if (form === 'snake' || form === 'bat') this.becomeCritter(group, form);
+      else this.paintMonster(group, form);
+      if (creature) creature.monster = form;
       return true;
     };
-    const riders = (root) => {
-      if (!root) return;
-      root.traverse((o) => {
-        if (o.userData && o.userData.inhabitant && turn(o)) n++;
-      });
-    };
     for (const c of this.creatures) {
-      if (!c.alive) continue;
-      if (c.kind === 'person') {
-        if (turn(c.mesh)) { c.monster = c.mesh.userData.monster; n++; }
-      } else if (c.hp != null && !c.monster) {
-        this.becomeCritter(c, animals[ai++ % animals.length]);
-        n++;
-      }
-      riders(c.mesh);
+      if (!c.alive || !c.mesh) continue;
+      if (c.hp != null && apply(c.mesh, c)) n++;
+      c.mesh.traverse((o) => {
+        if (o !== c.mesh && o.userData && o.userData.inhabitant && apply(o, null)) n++;
+      });
     }
-    for (const root of extraRoots) riders(root);
+    for (const root of extraRoots) {
+      if (!root) continue;
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant && apply(o, null)) n++;
+      });
+    }
     return n;
   }
 
@@ -543,16 +543,14 @@ export class Life {
     group.userData.monster = form;
   }
 
-  /* Swap an animal's bricks for a bat or a snake, on the same creature. */
-  becomeCritter(c, form) {
-    const g = c.mesh;
+  /* Swap this figure's bricks for a bat or a snake. The group's scale stays put. */
+  becomeCritter(g, form) {
     const shared = new Set([BR, CY, SP]);
     for (let i = g.children.length - 1; i >= 0; i--) {
       const ch = g.children[i];
       g.remove(ch);
       ch.traverse((o) => {
         if (!o.isMesh) return;
-        if (o.material) o.material.dispose();
         if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
       });
     }
@@ -563,8 +561,7 @@ export class Life {
     g.userData.segs = null;
     if (form === 'bat') this.fillBat(g);
     else this.fillSnake(g);
-    g.scale.setScalar(1.15);
-    c.monster = form;
+    g.userData.monster = form;
   }
 
   fillBat(g) {

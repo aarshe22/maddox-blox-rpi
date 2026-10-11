@@ -7,7 +7,7 @@ import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } fr
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
 import { voice } from './voice.js?v=1';
-import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=1';
+import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=2';
 import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js';
 import { sigOf, getState, setState, clearState } from './persist.js';
@@ -4067,8 +4067,15 @@ class Game {
   }
 
   startFlood() {
+    if (this.flood && this.flood.recede) {
+      this.toast('The waters are already receding', 'bad');
+      return;
+    }
     if (this.flood) {
-      this.toast('The waters are already over the world', 'bad');
+      this.flood.recede = true;
+      this.flood.target = -3.2;
+      sfx.wave();
+      this.toast('The waters recede. The damage stays.', 'good');
       return;
     }
     if (this.world.inHouse) {
@@ -4106,6 +4113,10 @@ class Game {
     const f = this.flood;
     if (!f) return;
     f.level += (f.target - f.level) * Math.min(1, dt * 0.42);
+    if (f.recede && f.level < 0.2) {
+      this.clearFlood();
+      return;
+    }
     this.world.floodY = f.level;
     const depth = Math.max(0.4, f.level + 2.2);
     f.mesh.scale.set(f.span, depth, f.span);
@@ -4443,11 +4454,41 @@ class Game {
     return n;
   }
 
+  clearHair() {
+    this.clearHairTrail();
+    const roots = [];
+    if (this.life) for (const c of this.life.creatures) if (c.mesh) roots.push(c.mesh);
+    for (const root of this.scenarioRoots()) roots.push(root);
+    for (const root of roots) {
+      const drop = [];
+      root.traverse((o) => { if (o.name === 'beard') drop.push(o); });
+      for (const mesh of drop) mesh.removeFromParent();
+      root.traverse((o) => {
+        if (!o.userData || !o.userData.hairMesh && !o.userData.hairPath) return;
+        o.userData.hairMesh = null;
+        o.userData.hairTrail = null;
+        o.userData.hairPath = null;
+        o.userData.hairStage = 0;
+        o.userData.hairAnchor = null;
+        o.userData.hairBack = null;
+        o.userData.hairBox = null;
+        o.userData.hairCount = 0;
+        o.userData.hairTrailLen = 0;
+        o.userData.hairWorldLen = 0;
+      });
+    }
+    this.hair = null;
+    if (this.refreshStrips) this.refreshStrips();
+  }
+
   unleashHalloween() {
-    const roots = this.scenarioRoots();
-    const n = this.life ? this.life.hauntPeople(roots) : 0;
+    const hadHair = !!this.hair;
+    this.clearHair();
+    const n = this.life ? this.life.hauntPeople(this.scenarioRoots()) : 0;
     if (!n) this.toast('Nothing left to turn', 'bad');
-    else this.toast('Halloween — zombies, ghosts, skeletons, bats, and snakes', 'good');
+    else this.toast(hadHair
+      ? 'Halloween — ghosts, zombies, skeletons, snakes, and bats. The hair is gone.'
+      : 'Halloween — ghosts, zombies, skeletons, snakes, and bats', 'good');
   }
 
   tryFire(ndc) {
@@ -6091,38 +6132,46 @@ class Game {
     };
     tapBtn(this.weaponBtn, () => { if (this.started) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon'); });
     tapBtn(this.weatherBtn, () => { if (this.started) this.setMode(this.mode === 'weather' ? 'explore' : 'weather'); });
+    document.addEventListener('pointerdown', (e) => {
+      if (!this.started || (this.mode !== 'weapon' && this.mode !== 'weather')) return;
+      if (this.stripBar && this.stripBar.contains(e.target)) return;
+      if (this.weaponBtn && this.weaponBtn.contains(e.target)) return;
+      if (this.weatherBtn && this.weatherBtn.contains(e.target)) return;
+      this.setMode('explore');
+    }, true);
     this.joyVec = { x: 0, y: 0 };
 
     const knob = this.joy.querySelector('.knob');
     let joyId = null, joyRect = null;
-    this.joy.addEventListener('touchstart', (e) => {
-      joyId = e.changedTouches[0].identifier;
-      joyRect = this.joy.getBoundingClientRect();
-      e.preventDefault();
-    }, { passive: false });
-    this.joy.addEventListener('touchmove', (e) => {
-      for (const t of e.changedTouches) {
-        if (t.identifier !== joyId || !joyRect) continue;
-        let vx = (t.clientX - (joyRect.left + joyRect.width / 2)) / (joyRect.width / 2);
-        let vy = (t.clientY - (joyRect.top + joyRect.height / 2)) / (joyRect.height / 2);
-        const len = Math.hypot(vx, vy);
-        if (len > 1) { vx /= len; vy /= len; }
-        this.joyVec = { x: vx, y: vy };
-        knob.style.transform = `translate(${vx * 30}px, ${vy * 30}px)`;
-      }
-      e.preventDefault();
-    }, { passive: false });
-    const joyUp = (e) => {
-      for (const t of e.changedTouches) {
-        if (t.identifier === joyId) {
-          joyId = null;
-          this.joyVec = { x: 0, y: 0 };
-          knob.style.transform = '';
-        }
-      }
+    const applyJoy = (e) => {
+      let vx = (e.clientX - (joyRect.left + joyRect.width / 2)) / (joyRect.width / 2);
+      let vy = (e.clientY - (joyRect.top + joyRect.height / 2)) / (joyRect.height / 2);
+      const len = Math.hypot(vx, vy);
+      if (len > 1) { vx /= len; vy /= len; }
+      this.joyVec = { x: vx, y: vy };
+      knob.style.transform = `translate(${vx * 30}px, ${vy * 30}px)`;
     };
-    this.joy.addEventListener('touchend', joyUp);
-    this.joy.addEventListener('touchcancel', joyUp);
+    this.joy.addEventListener('pointerdown', (e) => {
+      joyId = e.pointerId;
+      joyRect = this.joy.getBoundingClientRect();
+      try { this.joy.setPointerCapture(e.pointerId); } catch (err) {}
+      applyJoy(e);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    this.joy.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== joyId || !joyRect) return;
+      applyJoy(e);
+      e.preventDefault();
+    });
+    const joyUp = (e) => {
+      if (e.pointerId !== joyId) return;
+      joyId = null;
+      this.joyVec = { x: 0, y: 0 };
+      knob.style.transform = '';
+    };
+    this.joy.addEventListener('pointerup', joyUp);
+    this.joy.addEventListener('pointercancel', joyUp);
     this.jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.jumpQueued = 0.16; }, { passive: false });
     this.jumpBtn.addEventListener('click', (e) => { e.preventDefault(); this.jumpQueued = 0.16; });
     this.enterBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.toggleDoor(); }, { passive: false });

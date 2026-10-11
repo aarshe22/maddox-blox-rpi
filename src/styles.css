@@ -256,8 +256,9 @@ body.touch #panel-hint { display: none; }
   border-radius: 50%;
   background: rgba(255,255,255,.35);
   border: 3px solid rgba(255,255,255,.6);
-  display: none;
+  display: block;
   pointer-events: auto;
+  touch-action: none;
 }
 #joystick .knob {
   position: absolute;
@@ -268,8 +269,6 @@ body.touch #panel-hint { display: none; }
   background: rgba(255,255,255,.85);
   box-shadow: var(--shadow);
 }
-body.touch #joystick { display: block; }
-
 #btn-jump {
   position: absolute;
   right: 24px; bottom: 96px;
@@ -293,7 +292,7 @@ body.touch #btn-jump { display: block; }
   font-size: 13px;
   font-weight: 800;
   line-height: 1.05;
-  display: none;
+  display: block;
   pointer-events: auto;
   z-index: 6;
   -webkit-appearance: none;
@@ -310,9 +309,6 @@ body.touch #btn-jump { display: block; }
 #btn-weapon.on, #btn-weather.on {
   outline: 4px solid #fff;
 }
-html.touch #btn-weapon, html.touch #btn-weather,
-body.touch #btn-weapon, body.touch #btn-weather { display: block; }
-
 #btn-enter {
   position: absolute;
   right: 124px; bottom: 108px;
