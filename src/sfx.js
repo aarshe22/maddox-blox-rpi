@@ -78,6 +78,13 @@ class Sfx {
   destroy()  { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.6, 0.8, 1800, 120); this._tone(t, 0.35, 0.6, 'sine', 150, 45); } }
   thunder()  { if (this.ensure()) { const t = this.ac.currentTime;
     this._noise(t, 1.6, 0.85, 900, 40); this._tone(t, 1.2, 0.7, 'sine', 70, 28); this._noise(t + 0.12, 0.8, 0.5, 300, 60); } }
+  /* Crack lands on the same instant as the flash; the rumble follows. */
+  lightning() { if (this.ensure()) { const t = this.ac.currentTime;
+    this._noise(t, 0.07, 0.9, 4200, 900, 'highpass', 0.6);
+    this._tone(t, 0.04, 0.28, 'square', 1600, 240);
+    this._noise(t + 0.05, 1.45, 0.75, 640, 36);
+    this._tone(t + 0.06, 1.2, 0.55, 'sine', 52, 22);
+    this._noise(t + 0.18, 0.7, 0.35, 220, 48); } }
   meteorWhistle() { if (this.ensure()) { const t = this.ac.currentTime;
     this._tone(t, 1.1, 0.32, 'sine', 1600, 180); this._noise(t, 1.1, 0.22, 4000, 400, 'bandpass', 3); } }
   wave()     { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 1.8, 0.7, 600, 90); this._tone(t, 1.4, 0.4, 'sine', 55, 32); } }

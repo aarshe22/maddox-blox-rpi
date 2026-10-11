@@ -12,7 +12,9 @@ export const WEAPONS = [
   { id: 'grenade', name: 'Frag Grenade', icon: '💣', dmg: 54, radius: 4.6, maxBreak: 4, range: 16, cd: 1.15, kind: 'grenade' },
   { id: 'ufo',    name: 'UFO',          icon: '🛸', dmg: 0,   radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'ufo' },
   { id: 'jack',   name: 'Jack-o-lantern', icon: '🎃', dmg: 0, radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'halloween' },
-  { id: 'flood',  name: 'Biblical Flood', icon: '🌊', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'flood' }
+  { id: 'flood',  name: 'Biblical Flood', icon: '🌊', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'flood' },
+  { id: 'drop',   name: 'Water Drop', icon: '💧', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'water' },
+  { id: 'frost',  name: 'Snowflake', icon: '❄️', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'frost' }
 ];
 
 /* -------------------------------------------------------------------- FX */
@@ -189,6 +191,14 @@ export function buildWeaponModels() {
   flood.scale.setScalar(0.85);
   out.flood = flood;
 
+  const drop = makeDropMesh();
+  drop.scale.setScalar(0.7);
+  out.drop = drop;
+
+  const frost = makeFrostMesh();
+  frost.scale.setScalar(0.85);
+  out.frost = frost;
+
   for (const grp of Object.values(out)) grp.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   return out;
 }
@@ -224,6 +234,58 @@ export function makeWaveMesh() {
   crest.position.set(0.08, 0.12, -0.02);
   crest.rotation.z = 0.45;
   g.add(water, crest);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
+}
+
+export function makeFrostMesh() {
+  const g = new THREE.Group();
+  const ice = mkMat(0xe7f6ff);
+  const deep = mkMat(0x8ec8e6);
+  const hub = new THREE.Mesh(CY, deep);
+  hub.scale.set(0.16, 0.06, 0.16);
+  g.add(hub);
+  for (let i = 0; i < 6; i++) {
+    const pivot = new THREE.Group();
+    pivot.rotation.y = (i * Math.PI) / 3;
+    const arm = new THREE.Mesh(BR, ice);
+    arm.scale.set(0.07, 0.05, 0.72);
+    arm.position.z = -0.34;
+    const twigL = new THREE.Mesh(BR, deep);
+    twigL.scale.set(0.05, 0.04, 0.22);
+    twigL.position.set(-0.08, 0, -0.28);
+    twigL.rotation.y = 0.65;
+    const twigR = new THREE.Mesh(BR, deep);
+    twigR.scale.set(0.05, 0.04, 0.22);
+    twigR.position.set(0.08, 0, -0.28);
+    twigR.rotation.y = -0.65;
+    pivot.add(arm, twigL, twigR);
+    g.add(pivot);
+  }
+  g.rotation.x = 0.55;
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
+}
+
+export function makeDropMesh() {
+  const g = new THREE.Group();
+  const gel = { transparent: true, opacity: 0.62, depthWrite: false };
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), mkMat(0x3ec6ef, gel));
+  body.scale.set(0.86, 1.05, 0.8);
+  body.position.y = 0.12;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.42, 8), mkMat(0x8fe7ff, gel));
+  tip.position.y = 0.62;
+  const ink = mkMat(0x14324a);
+  const eye = (x) => {
+    const m = new THREE.Mesh(BR, ink);
+    m.scale.set(0.08, 0.09, 0.04);
+    m.position.set(x, 0.2, -0.34);
+    return m;
+  };
+  const smile = new THREE.Mesh(BR, ink);
+  smile.scale.set(0.2, 0.045, 0.04);
+  smile.position.set(0, 0.02, -0.34);
+  g.add(body, tip, eye(-0.12), eye(0.12), smile);
   g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   return g;
 }

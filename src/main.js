@@ -7,7 +7,7 @@ import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } fr
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
 import { sfx } from './sfx.js';
 import { voice } from './voice.js';
-import { Life } from './life.js';
+import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js';
 import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js';
 import { sigOf, getState, setState, clearState } from './persist.js';
@@ -91,6 +91,8 @@ const STRIP_PICS = {
   ufo: stripPic('<ellipse cx="32" cy="38" rx="26" ry="8" fill="#d5dbe4" stroke="#243044" stroke-width="3"/><path d="M18 36a14 12 0 0 1 28 0z" fill="#8fd0ff" stroke="#243044" stroke-width="3"/><circle cx="26" cy="30" r="2.2" fill="#243044"/><circle cx="32" cy="28" r="2.2" fill="#243044"/><circle cx="38" cy="30" r="2.2" fill="#243044"/><ellipse cx="32" cy="42" rx="8" ry="2.5" fill="#3dce55"/>'),
   jack: stripPic('<circle cx="32" cy="36" r="18" fill="#f27a12" stroke="#243044" stroke-width="3"/><path d="M32 12l5 10h-10z" fill="#3d6b2a" stroke="#243044" stroke-width="2"/><path d="M22 32l5 6h-5zM42 32l-5 6h5z" fill="#1a1208"/><path d="M22 46l5-6h10l5 6z" fill="#1a1208"/>'),
   flood: stripPic('<path d="M4 40c8-10 16-10 24 0s16 10 28 0v16H4z" fill="#1a6fbe" stroke="#243044" stroke-width="3"/><path d="M4 28c8-8 16-8 24 0s16 8 28 0" fill="none" stroke="#7ec8f8" stroke-width="4" stroke-linecap="round"/><path d="M8 18c6-6 12-6 18 0" fill="none" stroke="#d7f3ff" stroke-width="3" stroke-linecap="round"/>'),
+  drop: stripPic('<path d="M32 6c14 18 20 28 20 38a20 20 0 1 1-40 0c0-10 6-20 20-38z" fill="#3ec6ef" stroke="#243044" stroke-width="3"/><ellipse cx="26" cy="30" rx="6" ry="8" fill="#fff" fill-opacity=".45"/><circle cx="25" cy="42" r="2.4" fill="#14324a"/><circle cx="39" cy="42" r="2.4" fill="#14324a"/><path d="M26 50c3.2 3 8.8 3 12 0" fill="none" stroke="#14324a" stroke-width="2.4" stroke-linecap="round"/>'),
+  frost: stripPic('<g fill="none" stroke-linecap="round"><path d="M32 6v52M11 18.5l42 27M11 45.5l42-27" stroke="#7ec8f0" stroke-width="6"/><path d="M32 6v52M11 18.5l42 27M11 45.5l42-27" stroke="#f7fbff" stroke-width="2.4"/><path d="M32 14l-6-5M32 14l6-5M32 50l-6 5M32 50l6 5M20 24l-7-5M20 24l-2-8M44 40l7 5M44 40l2 8M20 40l-7 5M20 40l-2 8M44 24l7-5M44 24l2-8" stroke="#d7f3ff" stroke-width="3"/></g><circle cx="32" cy="32" r="4.5" fill="#fff" stroke="#243044" stroke-width="2"/>'),
   clear: stripPic('<circle cx="32" cy="32" r="14" fill="#ffd23f" stroke="#243044" stroke-width="3"/><g stroke="#ffd23f" stroke-width="4" stroke-linecap="round"><path d="M32 6v8M32 50v8M6 32h8M50 32h8M13 13l6 6M45 45l6 6M13 51l6-6M45 19l6-6"/></g>'),
   morning: stripPic('<rect x="4" y="36" width="56" height="20" rx="4" fill="#ffb066"/><path d="M8 40a24 24 0 0 1 48 0z" fill="#ffd23f" stroke="#243044" stroke-width="3"/>'),
   noon: stripPic('<circle cx="32" cy="32" r="16" fill="#ffe14a" stroke="#243044" stroke-width="3"/><g stroke="#ff9f1c" stroke-width="5" stroke-linecap="round"><path d="M32 4v8M32 52v8M4 32h8M52 32h8M12 12l6 6M46 46l6 6M12 52l6-6M46 18l6-6"/></g>'),
@@ -2680,6 +2682,8 @@ class Game {
     this.quietFx = false;
     this.saucer = null;
     this.flood = null;
+    this.chasm = null;
+    this.frosted = false;
     this.fireballs = [];
     this.meteors = [];
     this._falling = [];
@@ -2710,9 +2714,12 @@ class Game {
     this.stars = new StarField(this.scene);
     this.funnel = new Funnel(this.scene);
     this.wave = new WaveFront(this.scene);
-    this.bolt = new THREE.Mesh(BR, new THREE.MeshBasicMaterial({ color: 0xcfe8ff }));
+    this.bolt = new THREE.Group();
     this.bolt.visible = false;
     this.scene.add(this.bolt);
+    this.boltStrike = null;
+    this.storm = null;
+    this.stormFlash = null;
     this.flash = new THREE.PointLight(0xdfefff, 0, 120, 1);
     this.flash.position.set(0, 40, 0);
     this.scene.add(this.flash);
@@ -3056,11 +3063,13 @@ class Game {
     if (focus <= 0) { this.unequipWeapon(); return; }
     const def = WEAPONS[focus - 1];
     voice.speak(def.name);
-    if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood') {
+    if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost') {
       if (def.kind === 'ufo') {
         if (!this.saucer) this.launchSaucer();
       } else if (def.kind === 'halloween') this.unleashHalloween();
-      else this.startFlood();
+      else if (def.kind === 'flood') this.startFlood();
+      else if (def.kind === 'water') this.unleashWater();
+      else this.unleashFrost();
       this.refreshStrips();
       return;
     }
@@ -3146,9 +3155,14 @@ class Game {
     this.shakeT = 0;
     this.boltT = 0;
     this.bolt.visible = false;
+    this.clearBolt();
+    this.storm = null;
+    this.stormFlash = null;
+    if (this.flashWash && !(this.nuke && this.nuke.stage === 'flash')) this.flashWash.style.opacity = '0';
     if (this.mode !== 'weather') this.setMode('weather');
     sfx.unloopAll();
     if (def.id === 'clear') this.defuseNuke();
+    if (def.id !== 'quake') this.clearChasm();
     this.rain.points.visible = false;
     this.snowf.points.visible = false;
     this.funnel.show(false);
@@ -3160,7 +3174,8 @@ class Game {
       case 'snow': sfx.loop('snow', { type: 'lowpass', f: 420, q: 0.6, gain: 0.1 });
         this.snowf.recenter(p.x, p.z); this.snowf.points.visible = true; break;
       case 'thunder': sfx.loop('storm', { type: 'lowpass', f: 900, q: 0.6, gain: 0.26, lfo: 0.25, lfoDepth: 250 });
-        this.rain.recenter(p.x, p.z); this.rain.points.visible = true; break;
+        this.rain.recenter(p.x, p.z); this.rain.points.visible = true;
+        this.armStorm(); break;
       case 'tornado': sfx.loop('tornado', { type: 'lowpass', f: 260, q: 0.9, gain: 0.34, lfo: 0.18, lfoDepth: 90 });
         this.funnel.show(true);
         this.tornadoPos.set(p.x + 22, 0, p.z + 22); this.tornadoTgt.copy(this.tornadoPos); break;
@@ -3169,6 +3184,7 @@ class Game {
         this.funnel.show(true);
         this.tornadoPos.set(p.x + 18, 0, p.z - 18); this.tornadoTgt.copy(this.tornadoPos); break;
       case 'quake': sfx.loop('quake', { type: 'lowpass', f: 65, q: 1.2, gain: 0.42 });
+        this.clearChasm();
         this.shakeT = 9999; break;
       case 'tsunami': sfx.wave(); this.waveId++;
         this.waveZ = -this.world.half - 14; break;
@@ -3270,7 +3286,7 @@ class Game {
 
   /* ---------------------------------------------------------- attacks */
   isScenario(def) {
-    return !!def && (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood');
+    return !!def && (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost');
   }
 
   armedWeapon() {
@@ -3326,12 +3342,339 @@ class Game {
     f.mesh.position.set(0, -2.2 + depth / 2 + Math.sin(this.time * 1.1) * 0.06, 0);
   }
 
-  unleashHalloween() {
+  /* Jagged trench through the map origin. x runs the length; z and width wander. */
+  pointInChasm(x, z, samples) {
+    const s = samples || (this.chasm && this.chasm.samples);
+    if (!s || !s.length) return false;
+    if (x < s[0].x - 1 || x > s[s.length - 1].x + 1) return false;
+    let i = 0;
+    while (i < s.length - 1 && s[i + 1].x < x) i++;
+    const a = s[i];
+    const b = s[Math.min(i + 1, s.length - 1)];
+    const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
+    const cz = a.z + (b.z - a.z) * t;
+    const hw = a.halfW + (b.halfW - a.halfW) * t;
+    return Math.abs(z - cz) <= hw;
+  }
+
+  chasmCenter(x, samples) {
+    const s = samples;
+    let i = 0;
+    while (i < s.length - 1 && s[i + 1].x < x) i++;
+    const a = s[i];
+    const b = s[Math.min(i + 1, s.length - 1)];
+    const t = b.x === a.x ? 0 : clamp((x - a.x) / (b.x - a.x), 0, 1);
+    return {
+      z: a.z + (b.z - a.z) * t,
+      halfW: a.halfW + (b.halfW - a.halfW) * t
+    };
+  }
+
+  /* Hide the grass in the rip and cut the walkable slab so the trench is a hole. */
+  gashGround(samples) {
+    const G = this.world.groundGrid;
+    if (!G || !G.mesh) return;
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const P = G.P;
+    for (const [key, ci] of G.cells) {
+      const parts = key.split('|');
+      const ix = +parts[0];
+      const iz = +parts[1];
+      const x = G.gx0 + ix * P + P / 2;
+      const z = G.gz0 + iz * P + P / 2;
+      if (!this.pointInChasm(x, z, samples)) continue;
+      G.mesh.setMatrixAt(ci, zero);
+      this.world._subSolidFrom(new THREE.Box3(
+        new THREE.Vector3(x - P / 2, -1.7, z - P / 2),
+        new THREE.Vector3(x + P / 2, 0.05, z + P / 2)
+      ));
+    }
+    G.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  openChasm() {
+    if (this.chasm) return;
+    const H = this.world.half;
+    const samples = [];
+    let z = (Math.random() - 0.5) * 3;
+    for (let x = -H; x <= H + 0.01; x += 5) {
+      z = clamp(z + (Math.random() - 0.5) * 5.2, -9, 9);
+      samples.push({ x, z, halfW: 2.4 + Math.random() * 2.8 });
+    }
+    const root = new THREE.Group();
+    root.name = 'chasm';
+    const rock = mkMat(0x1a0806);
+    const lavaMat = mkMat(0xff2e0a);
+    const flames = [];
+    const beds = [];
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i];
+      const b = samples[i + 1];
+      const mx = (a.x + b.x) / 2;
+      const mz = (a.z + b.z) / 2;
+      const len = Math.hypot(b.x - a.x, b.z - a.z) + 1.1;
+      const wid = a.halfW + b.halfW;
+      const pit = new THREE.Mesh(BR, rock);
+      pit.scale.set(wid, 9, len);
+      pit.position.set(mx, -4.1, mz);
+      pit.lookAt(b.x, -4.1, b.z);
+      root.add(pit);
+      const bed = new THREE.Mesh(BR, lavaMat);
+      bed.scale.set(wid * 0.78, 0.4, len * 0.9);
+      bed.position.set(mx, -0.35, mz);
+      bed.lookAt(b.x, -0.35, b.z);
+      root.add(bed);
+      beds.push(bed);
+      const flame = new THREE.Mesh(BR, mkMat(0xff4a12, { transparent: true, opacity: 0.78, depthWrite: false }));
+      flame.scale.set(wid * 0.42, 2.4, 1.15);
+      flame.position.set(a.x, 0.6, a.z);
+      flame.renderOrder = 2;
+      root.add(flame);
+      flames.push(flame);
+    }
+    const mid = samples[Math.floor(samples.length / 2)];
+    const light = new THREE.PointLight(0xff4010, 4, 48, 1);
+    light.position.set(0, 3, mid.z);
+    root.add(light);
+    this.scene.add(root);
+    this.gashGround(samples);
+
+    const buildings = new Set(['house', 'school', 'church', 'store', 'police', 'fire', 'barn']);
+    const bucket = this.world._b && this.world._b.group;
+    const falls = [];
+    const doomed = new Set();
+    for (const p of this.world.props) {
+      if (p.gone || !buildings.has(p.kind)) continue;
+      if (!this.pointInChasm(p.cx, p.cz, samples)) continue;
+      const targets = new Set();
+      const groupKind = p.kind !== 'barn';
+      for (const pt of p.parts) {
+        const mesh = pt.mesh;
+        if (!mesh) continue;
+        const parent = mesh.parent;
+        if (groupKind && parent && parent !== bucket && parent !== this.scene) targets.add(parent);
+        else targets.add(mesh);
+      }
+      if (!targets.size) continue;
+      for (const pt of p.parts) if (pt.solid) pt.solid.disabled = true;
+      p.gone = true;
+      doomed.add(p);
+      for (const target of targets) {
+        falls.push({ target, vy: 0.4, kind: 'building', screamAt: falls.length * 0.06, screamed: false });
+      }
+    }
+    if (this.world.inHouse && this.world.activeInterior) {
+      const door = (this.world.doorAnchors || []).find((d) => d.interior === this.world.activeInterior);
+      if (door && doomed.has(door.prop)) {
+        this.world.exitHouse();
+        this.applyOutdoorFog();
+      }
+    }
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || c.hp == null || !c.mesh) continue;
+        if (!this.pointInChasm(c.mesh.position.x, c.mesh.position.z, samples)) continue;
+        c.chasmFall = true;
+        falls.push({
+          target: c.mesh, vy: 0, kind: 'life', creature: c,
+          screamAt: falls.length * 0.05, screamed: false
+        });
+      }
+    }
+    const pp = this.player.pos;
+    if (this.pointInChasm(pp.x, pp.z, samples)) {
+      const spot = this.chasmCenter(pp.x, samples);
+      const side = pp.z >= spot.z ? 1 : -1;
+      pp.z = clamp(spot.z + side * (spot.halfW + 1.6), -H + 2, H - 2);
+      pp.y = Math.max(pp.y, 0.2);
+    }
+    this.chasm = { root, samples, flames, beds, lavaMat, light, t: 0, falls };
+    sfx.thunder();
+    sfx.explode();
+    this.shakeT = Math.max(this.shakeT, 2.4);
+    this.toast('The earth rips open — a chasm of fire', 'bad');
+  }
+
+  updateChasm(dt) {
+    const c = this.chasm;
+    if (!c) return;
+    c.t += dt;
+    const heat = Math.min(1, c.t / 14);
+    const hot = new THREE.Color(0xff2a08).lerp(new THREE.Color(0xfff4b0), heat);
+    c.lavaMat.color.copy(hot);
+    c.flames.forEach((f, i) => {
+      const flick = 0.82 + Math.sin(this.time * 11 + i * 1.7) * 0.18;
+      const h = (2.6 + heat * 22) * flick;
+      f.scale.y = h;
+      f.position.y = -0.15 + h * 0.42;
+      f.material.color.copy(hot);
+      f.material.opacity = 0.72 + heat * 0.26;
+    });
+    if (c.light) {
+      c.light.intensity = 3 + heat * 16;
+      c.light.distance = 36 + heat * 40;
+      c.light.color.copy(hot);
+      c.light.position.y = 2 + heat * 8;
+    }
+    for (const f of c.falls) {
+      if (!f.screamed && c.t >= f.screamAt) {
+        f.screamed = true;
+        if (f.kind === 'life') sfx.scream();
+        else sfx.crack();
+      }
+      if (f.done) continue;
+      f.vy = Math.min(32, f.vy + 26 * dt);
+      f.target.position.y -= f.vy * dt;
+      f.target.rotation.x += dt * 1.6;
+      f.target.rotation.z += dt * 0.9;
+      if (f.target.position.y < -8) {
+        f.target.visible = false;
+        f.done = true;
+        if (f.creature) {
+          f.creature.alive = false;
+          f.creature.hp = 0;
+          f.creature.mesh.visible = false;
+        }
+      }
+    }
+  }
+
+  clearChasm() {
+    const c = this.chasm;
+    if (!c) return;
+    for (const f of c.falls) {
+      if (!f.done) f.target.visible = false;
+      if (f.creature && f.creature.alive) {
+        f.creature.alive = false;
+        f.creature.hp = 0;
+      }
+    }
+    this.scene.remove(c.root);
+    c.root.traverse((o) => {
+      if (o.isMesh && o.material && o.material !== c.lavaMat) o.material.dispose();
+    });
+    if (c.lavaMat) c.lavaMat.dispose();
+    this.chasm = null;
+  }
+
+  scenarioRoots() {
     const roots = [];
     if (this.train && this.train.group) roots.push(this.train.group);
     for (const it of this.world.interiors || []) {
       if (it.ref && it.ref.group) roots.push(it.ref.group);
     }
+    return roots;
+  }
+
+  unleashWater() {
+    const nLife = this.life ? this.life.liquefy(this.scenarioRoots()) : 0;
+    const nStruct = this.liquefyStructures();
+    const n = nLife + nStruct;
+    if (!n) this.toast('Nothing left to turn to water', 'bad');
+    else this.toast('Water drop — people, animals, buildings, trees, and the monument turn to water', 'good');
+  }
+
+  /* Whole-world frost. Opaque cold colors, snow on the ground, no air flakes. */
+  unleashFrost() {
+    if (this.frosted) {
+      this.toast('The world is already frozen', 'bad');
+      return;
+    }
+    const roots = this.scenarioRoots();
+    if (this.life) this.life.freeze(roots);
+    for (const root of roots) {
+      if (root.userData.aqueous && root.userData.baseScale) root.scale.copy(root.userData.baseScale);
+      root.userData.aqueous = false;
+      paintFrozen(root, WORLD_FROST);
+      root.userData.frozen = true;
+    }
+    const bucket = this.world._b && this.world._b.group;
+    const ground = this.world.groundGrid && this.world.groundGrid.mesh;
+    if (bucket) {
+      bucket.traverse((o) => {
+        if (o.userData && o.userData.aqueous) {
+          o.userData.aqueous = false;
+          if (o.userData.baseScale) o.scale.copy(o.userData.baseScale);
+        }
+      });
+      paintFrozen(bucket, WORLD_FROST, ground);
+    }
+    if (this.life) this.life.aqueous = this.life.aqueous.filter((g) => g.userData.aqueous);
+    this.snowGround();
+    this.freezePlayer();
+    if (this.world.brickMap) {
+      for (const rec of this.world.brickMap.values()) {
+        if (rec.group) paintFrozen(rec.group, WORLD_FROST);
+      }
+    }
+    if (this.flood && this.flood.mesh) {
+      this.flood.mesh.material = mkMat(0xd7eef8, { transparent: true, opacity: 0.72, depthWrite: false });
+    }
+    this.frosted = true;
+    sfx.crack();
+    this.toast('Snowflake — the world is frozen under snow', 'good');
+  }
+
+  snowGround() {
+    const mesh = this.world.groundGrid && this.world.groundGrid.mesh;
+    if (!mesh) return;
+    const snow = mkMat(0xffffff);
+    mesh.material = snow;
+    const tones = [0xfbfdff, 0xf4f8fb, 0xe7f2f8, 0xf7fbff, 0xdceaf3, 0xeef6fa, 0xc5dcea, 0xe4eef4];
+    const color = new THREE.Color();
+    for (let i = 0; i < mesh.count; i++) {
+      color.setHex(tones[(i * 3 + (i >> 2)) % tones.length]);
+      mesh.setColorAt(i, color);
+    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
+  freezePlayer() {
+    if (!this.player || !this.player.root) return;
+    const skip = new Set();
+    if (this.weaponRig) this.weaponRig.traverse((o) => skip.add(o));
+    let i = 0;
+    const tones = [0xffffff, 0xf4fbff, 0xe7f6ff, 0xd4efff, 0xbfe4f8, 0x9fd4ee];
+    this.player.root.traverse((o) => {
+      if (skip.has(o) || !o.isMesh || !o.material) return;
+      o.material = mkMat(tones[i % tones.length]);
+      i++;
+    });
+  }
+
+  /* Buildings, trees, and the monument. Crops and terrain stay solid. */
+  liquefyStructures() {
+    const kinds = new Set(['house', 'school', 'church', 'store', 'police', 'fire', 'barn', 'tree', 'monument']);
+    const bucket = this.world._b && this.world._b.group;
+    let n = 0;
+    for (const p of this.world.props) {
+      if (!kinds.has(p.kind) || p._aqueous) continue;
+      const groupKinds = p.kind !== 'tree' && p.kind !== 'barn';
+      const roots = new Set();
+      for (const pt of p.parts) {
+        const mesh = pt.mesh;
+        if (!mesh) continue;
+        const parent = mesh.parent;
+        if (groupKinds && parent && parent !== bucket && parent !== this.scene) roots.add(parent);
+        else roots.add(mesh);
+      }
+      for (const root of roots) {
+        paintAqueous(root);
+        if (this.life && !root.userData.aqueous) {
+          root.userData.baseScale = root.scale.clone();
+          root.userData.phase = Math.random() * Math.PI * 2;
+          root.userData.aqueous = true;
+          this.life.aqueous.push(root);
+        }
+      }
+      p._aqueous = true;
+      n++;
+    }
+    return n;
+  }
+
+  unleashHalloween() {
+    const roots = this.scenarioRoots();
     const n = this.life ? this.life.hauntPeople(roots) : 0;
     if (!n) this.toast('Nothing left to turn', 'bad');
     else this.toast('Halloween — zombies, ghosts, skeletons, bats, and snakes', 'good');
@@ -3484,21 +3827,166 @@ class Game {
     return near[Math.floor(Math.random() * near.length)];
   }
 
+  /* Three separate bolts, spaced so each crack and strobe lands on its own. */
+  armStorm() {
+    this.clearBolt();
+    this.storm = { left: 3, wait: 0.45 };
+  }
+
+  clearBolt() {
+    if (!this.bolt) return;
+    const mats = new Set();
+    for (let i = this.bolt.children.length - 1; i >= 0; i--) {
+      const ch = this.bolt.children[i];
+      this.bolt.remove(ch);
+      if (ch.material) mats.add(ch.material);
+    }
+    for (const m of mats) m.dispose();
+    this.bolt.visible = false;
+    this.boltStrike = null;
+  }
+
   strikeLightning() {
-    const target = this.weatherPickProp() || null;
-    const at = target ? this.world.hitPoint(target, new THREE.Vector3(target.cx, 20, target.cz))
-      : new THREE.Vector3(this.player.pos.x + (Math.random() * 2 - 1) * 30, 0, this.player.pos.z + (Math.random() * 2 - 1) * 30);
-    const H = 34;
+    this.clearBolt();
+    const H = this.world.half;
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 12 + Math.random() * 26;
+    const x = clamp(this.player.pos.x + Math.cos(ang) * dist, -H + 4, H - 4);
+    const z = clamp(this.player.pos.z + Math.sin(ang) * dist, -H + 4, H - 4);
+    const gy = this.world.surfaceTop(Math.floor(x), Math.floor(z), 48);
+    const groundY = gy > -Infinity ? gy + 0.15 : 0.15;
+    const top = groundY + 48;
+    const pts = [new THREE.Vector3(x, top, z)];
+    let cx = x, cz = z, y = top;
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      const last = i === steps;
+      cx += last ? (x - cx) * 0.85 : (Math.random() - 0.5) * 7;
+      cz += last ? (z - cz) * 0.85 : (Math.random() - 0.5) * 7;
+      y = last ? groundY : y - (top - groundY) / steps;
+      pts.push(new THREE.Vector3(cx, y, cz));
+    }
+    pts[pts.length - 1].set(x, groundY, z);
+    const core = new THREE.MeshBasicMaterial({ color: 0xf7fbff });
+    const glow = new THREE.MeshBasicMaterial({ color: 0x7ec8ff, transparent: true, opacity: 0.55, depthWrite: false });
+    const up = new THREE.Vector3(0, 1, 0);
+    const main = [];
+    const addSeg = (a, b, mat, thick, bucket) => {
+      const dir = new THREE.Vector3().subVectors(b, a);
+      const len = dir.length();
+      if (len < 0.05) return;
+      const mesh = new THREE.Mesh(BR, mat);
+      mesh.scale.set(thick, len, thick);
+      mesh.position.copy(a).add(b).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(up, dir.normalize());
+      mesh.visible = false;
+      mesh.renderOrder = 3;
+      this.bolt.add(mesh);
+      bucket.push(mesh);
+    };
+    for (let i = 0; i < pts.length - 1; i++) {
+      addSeg(pts[i], pts[i + 1], glow, 1.55, main);
+      addSeg(pts[i], pts[i + 1], core, 0.42, main);
+    }
+    const fork = [];
+    const branchAt = pts[3];
+    let fx = branchAt.x, fy = branchAt.y, fz = branchAt.z;
+    const fdx = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 2);
+    const fdz = (Math.random() - 0.5) * 4;
+    for (let i = 0; i < 3; i++) {
+      const nx = fx + fdx, ny = fy - 4.5, nz = fz + fdz;
+      const a = new THREE.Vector3(fx, fy, fz);
+      const b = new THREE.Vector3(nx, ny, nz);
+      addSeg(a, b, glow, 0.9, fork);
+      addSeg(a, b, core, 0.28, fork);
+      fx = nx; fy = ny; fz = nz;
+    }
     this.bolt.visible = true;
-    this.bolt.scale.set(0.35, H, 0.35);
-    this.bolt.position.set(at.x, H / 2, at.z);
-    this.flash.position.set(at.x, H * 0.7, at.z);
-    this.flash.intensity = 8;
-    this.boltT = 0.14;
-    sfx.thunder();
-    if (target) {
-      this.world.applyHit(target, this.weatherDef.dmg, new THREE.Vector3(at.x, Math.max(1, at.y), at.z));
-    } else if (this.player.pos.distanceTo(at) < 6) {
+    this.boltStrike = { main, fork, t: 0, grow: 0.16, hit: false, at: new THREE.Vector3(x, groundY, z) };
+  }
+
+  updateBolt(dt) {
+    const b = this.boltStrike;
+    if (!b) return;
+    b.t += dt;
+    const u = Math.min(1, b.t / b.grow);
+    const n = Math.max(1, Math.ceil(u * b.main.length));
+    b.main.forEach((s, i) => { s.visible = i < n; });
+    if (u > 0.5) b.fork.forEach((s) => { s.visible = true; });
+    if (!b.hit && u >= 1) {
+      b.hit = true;
+      sfx.lightning();
+      this.stormFlash = { t: 0 };
+      this.flash.color.setHex(0xf4fbff);
+      this.flash.position.set(b.at.x, b.at.y + 10, b.at.z);
+      this.flash.intensity = 36;
+      this.shakeT = Math.max(this.shakeT, 0.42);
+      this.strikeDamage(b.at);
+      if (navigator.vibrate) navigator.vibrate(40);
+    }
+    if (b.hit && b.t > b.grow + 0.42) {
+      this.bolt.visible = false;
+      this.boltStrike = null;
+    }
+  }
+
+  updateStormFlash(dt) {
+    const f = this.stormFlash;
+    if (!f) return;
+    f.t += dt;
+    const pulses = [0, 0.07, 0.15, 0.26];
+    let on = false;
+    for (const p of pulses) if (f.t >= p && f.t < p + 0.04) on = true;
+    const nukeFlash = this.nuke && this.nuke.stage === 'flash';
+    if (this.flashWash && !nukeFlash) {
+      this.flashWash.style.background = f.t < 0.1 ? '#f7fbff' : '#fff';
+      this.flashWash.style.opacity = on ? '0.88' : (f.t < 0.36 ? '0.14' : '0');
+    }
+    if (!on && f.t > 0.05) this.flash.intensity = 0;
+    if (f.t > 0.42) {
+      this.stormFlash = null;
+      if (this.flashWash && !nukeFlash) this.flashWash.style.opacity = '0';
+      this.flash.intensity = 0;
+    }
+  }
+
+  updateStorm(dt) {
+    this.updateBolt(dt);
+    this.updateStormFlash(dt);
+    if (this.weather !== 'thunder' || !this.storm) return;
+    this.storm.wait -= dt;
+    if (this.storm.wait > 0) return;
+    this.storm.left -= 1;
+    this.strikeLightning();
+    if (this.storm.left <= 0) this.storm = null;
+    else this.storm.wait = 1.25;
+  }
+
+  /* Damage only the ground the bolt actually hits. */
+  strikeDamage(at) {
+    const dmg = (this.weatherDef && this.weatherDef.dmg) || 40;
+    const r = 4.2;
+    for (const pr of this.world.props) {
+      if (pr.gone) continue;
+      if (Math.hypot(pr.cx - at.x, pr.cz - at.z) > r + 1.5) continue;
+      const pt = this.world.hitPoint(pr, new THREE.Vector3(at.x, at.y + 2, at.z));
+      this.world.applyHit(pr, dmg, pt);
+    }
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || c.hp == null) continue;
+        const d = Math.hypot(c.mesh.position.x - at.x, c.mesh.position.z - at.z);
+        if (d > r) continue;
+        this.life.hurt(c, dmg * (1 - d / r));
+      }
+    }
+    const pp = this.player.pos;
+    if (Math.hypot(pp.x - at.x, pp.z - at.z) < r) {
+      const push = new THREE.Vector3(pp.x - at.x, 0, pp.z - at.z);
+      if (push.lengthSq() < 0.01) push.set(1, 0, 0);
+      push.normalize().multiplyScalar(7);
+      push.y = 4;
+      this.player.vel.add(push);
       sfx.hurt();
     }
   }
@@ -3611,7 +4099,8 @@ class Game {
     if (def.id === 'rain' || def.id === 'thunder') this.rain.update(dt, p.x, p.z, -30, -4);
     if (def.id === 'snow') this.snowf.update(dt, p.x, p.z, -1.6, Math.sin(this.weatherT * 0.4) * 1.2);
     if (this.boltT > 0) { this.boltT -= dt; this.bolt.visible = this.boltT > 0; }
-    if (this.flash.intensity > 0 && !(this.nuke && this.nuke.stage === 'flash')) {
+    this.updateStorm(dt);
+    if (this.flash.intensity > 0 && !(this.nuke && this.nuke.stage === 'flash') && !this.stormFlash) {
       this.flash.intensity = Math.max(0, this.flash.intensity - dt * 40);
     }
 
@@ -3621,12 +4110,12 @@ class Game {
       if (this.weatherDmgT >= def.every) {
         this.weatherDmgT = 0;
         if (def.strike) {
-          this.strikeLightning();
+          // three jagged bolts are queued by armStorm, not this tick
         } else if (def.id === 'meteor') {
           this.spawnMeteor();
         } else if (def.mover) {
           // funnel path damage handled continuously below
-        } else if (def.shake) { // earthquake: cracks everything near the player
+        } else if (def.shake && !this.chasm) { // rumble until the chasm rips
           for (const pr of this.world.props) {
             if (pr.gone || Math.hypot(pr.cx - p.x, pr.cz - p.z) > 42) continue;
             const pt = this.world.hitPoint(pr, new THREE.Vector3(pr.cx, 1, pr.cz));
@@ -3645,6 +4134,9 @@ class Game {
         }
       }
     }
+
+    if (def.shake && !this.chasm && this.weatherT >= 5) this.openChasm();
+    if (this.chasm) this.updateChasm(dt);
 
     // mover: tornado / hurricane funnel roams, sucking up debris and smashing props
     if (def.mover) {
@@ -4060,6 +4552,7 @@ class Game {
     this.defuseNuke();
     this.clearSaucer();
     this.clearFlood();
+    this.clearChasm();
     this.clearBlockShots();
     for (const list of [this.rockets, this.fireballs, this.meteors, this._falling]) {
       if (!list) continue;
@@ -4073,6 +4566,8 @@ class Game {
   regenerateWorld() {
     this.clearSaucer();
     this.clearFlood();
+    this.clearChasm();
+    this.frosted = false;
     this.clearBlockShots();
     if (this.life) { this.life.dispose(); }
     if (this.train) { this.train.dispose(); this.train = null; }

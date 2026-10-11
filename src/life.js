@@ -20,6 +20,52 @@ const VITALS = {
   bird: { hp: 10, h: 0.145, r: 0.16, w: 0.4, d: 0.3 }
 };
 
+const PEOPLE_FROST = [0xffffff, 0xf4fbff, 0xe7f6ff, 0xd4efff, 0xbfe4f8, 0x9fd4ee];
+export const WORLD_FROST = [0xf7fbff, 0xe7f1f8, 0xd5e6f2, 0xc5dce8, 0xb7d3e4, 0xa9c9dc, 0xeef4f8, 0xdce7ef, 0xc9d8e6, 0x8eb6cc];
+
+/* Opaque ice. New materials only — shared building colors stay intact. */
+export function paintFrozen(root, palette = PEOPLE_FROST, skip = null) {
+  let i = 0;
+  const walk = (node) => {
+    if (!node || node === skip) return;
+    if (node.isMesh && node.material) {
+      const tiny = node.scale && node.scale.x < 0.08 && node.scale.y < 0.08;
+      const hex = tiny ? 0x6ea4be : palette[i % palette.length];
+      i++;
+      node.material = mkMat(hex);
+    }
+    for (const ch of node.children || []) walk(ch);
+  };
+  walk(root);
+}
+
+/* Translucent water gel. New materials only — shared building colors stay intact. */
+export function paintAqueous(root) {
+  const meshes = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (node.isMesh) meshes.push(node);
+    for (const ch of node.children || []) {
+      if (ch.userData && ch.userData.inhabitant) continue;
+      walk(ch);
+    }
+  };
+  walk(root);
+  for (const m of meshes) {
+    const high = m.position.y > 0.48;
+    const mat = mkMat(high ? 0x9aebff : 0x2a9fe6, {
+      transparent: true,
+      opacity: high ? 0.38 : 0.5,
+      depthWrite: false
+    });
+    mat.polygonOffset = true;
+    mat.polygonOffsetFactor = 1;
+    mat.polygonOffsetUnits = 1;
+    m.material = mat;
+    m.renderOrder = 1;
+  }
+}
+
 const SKINS = [0xffcc99, 0xf5b98b, 0xd69c6d, 0xa5714b, 0x8a5a3b];
 const SHIRTS = [0xdc1414, 0x2f7de1, 0xf5aa0f, 0x2aa876, 0x8e44ad, 0x16a3b8, 0xd81e5b];
 const HATS = [0x22252b, 0xdc1414, 0x2f7de1, 0xffdc2d, 0xffffff];
@@ -251,6 +297,8 @@ export class Life {
     this.scene = scene;
     this.rand = rand;
     this.creatures = [];
+    this.aqueous = [];
+    this.jellyT = 0;
     this.group = new THREE.Group();
     this.group.name = 'life';
     scene.add(this.group);
@@ -407,6 +455,67 @@ export class Life {
     }
     for (const root of extraRoots) riders(root);
     return n;
+  }
+
+  /* White and ice-blue coat. Same bodies, they keep walking. Stops the water wobble. */
+  freeze(extraRoots = []) {
+    let n = 0;
+    const coat = (group) => {
+      if (!group || group.userData.frozen) return false;
+      if (group.userData.aqueous) {
+        group.userData.aqueous = false;
+        if (group.userData.baseScale) group.scale.copy(group.userData.baseScale);
+        const i = this.aqueous.indexOf(group);
+        if (i >= 0) this.aqueous.splice(i, 1);
+      }
+      paintFrozen(group);
+      group.userData.frozen = true;
+      return true;
+    };
+    const riders = (root) => {
+      if (!root) return;
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant && coat(o)) n++;
+      });
+    };
+    for (const c of this.creatures) {
+      if (!c.alive || !c.mesh) continue;
+      if (coat(c.mesh)) n++;
+      riders(c.mesh);
+    }
+    for (const root of extraRoots) riders(root);
+    return n;
+  }
+
+  /* Repaint people and animals as translucent water. Same bodies, no new creatures. */
+  liquefy(extraRoots = []) {
+    let n = 0;
+    const soak = (group) => {
+      if (!group || group.userData.aqueous) return false;
+      this.paintWater(group);
+      group.userData.baseScale = group.scale.clone();
+      group.userData.phase = Math.random() * Math.PI * 2;
+      group.userData.aqueous = true;
+      this.aqueous.push(group);
+      return true;
+    };
+    const riders = (root) => {
+      if (!root) return;
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant && soak(o)) n++;
+      });
+    };
+    for (const c of this.creatures) {
+      if (!c.alive) continue;
+      if (c.hp != null && soak(c.mesh)) { c.aqueous = true; n++; }
+      riders(c.mesh);
+    }
+    for (const root of extraRoots) riders(root);
+    return n;
+  }
+
+  paintWater(group) {
+    paintAqueous(group);
   }
 
   /* Recolor every brick of this one figure, including hats and nested arms. */
@@ -659,8 +768,15 @@ export class Life {
 
   update(dt) {
     const w = this.world;
+    this.jellyT += dt;
+    for (const g of this.aqueous) {
+      const b = g.userData.baseScale;
+      if (!b || !g.parent) continue;
+      const s = Math.sin(this.jellyT * 2.7 + g.userData.phase);
+      g.scale.set(b.x * (1 + s * 0.055), b.y * (1 - s * 0.08), b.z * (1 + s * 0.055));
+    }
     for (const c of this.creatures) {
-      if (!c.alive || c.abduct) continue;
+      if (!c.alive || c.abduct || c.chasmFall) continue;
       c.t += dt;
       const m = c.mesh;
 
