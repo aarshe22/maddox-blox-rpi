@@ -2944,7 +2944,12 @@ class Game {
       el.className = 'slot';
       el.title = `${w.name} — ${w.dmg} dmg`;
       el.innerHTML = `<span class="key">${i + 1}</span><span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
-      el.addEventListener('click', (e) => { e.preventDefault(); this.setMode('weapon'); this.confirmWeapon(i + 1); });
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.setMode('weapon');
+        this.confirmWeapon(i + 1);
+        if (document.body.classList.contains('touch')) this.setMode('explore');
+      });
       this.stripBar.appendChild(el);
       return el;
     });
@@ -2954,7 +2959,11 @@ class Game {
       el.className = 'slot weather-w';
       el.title = w.name;
       el.innerHTML = `<span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
-      el.addEventListener('click', (e) => { e.preventDefault(); this.onWeatherClick(w.id); });
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.onWeatherClick(w.id);
+        if (document.body.classList.contains('touch')) this.setMode('explore');
+      });
       this.stripBar.appendChild(el);
       return el;
     });
@@ -3051,6 +3060,8 @@ class Game {
       : `🌦️ WEATHER · ${this.weatherDef.name}`;
     this.modePill.textContent = label;
     this.modePill.className = weapon ? 'weapon' : weather ? 'weather' : this.mode === 'explore' ? 'explore' : '';
+    if (this.weaponBtn) this.weaponBtn.classList.toggle('on', weapon);
+    if (this.weatherBtn) this.weatherBtn.classList.toggle('on', weather);
   }
 
   selectWeapon(i) {
@@ -4699,7 +4710,8 @@ class Game {
     this.hoverNdc = null;
     c.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch' && this.touchUi(e)) return;
-      if (this.mode === 'weapon' && this.started && !this.world.inHouse && this.pointers.size === 0 && e.button !== 2) {
+      const touchShot = e.pointerType === 'touch' && this.mode === 'explore' && !!this.armedWeapon();
+      if ((touchShot || this.mode === 'weapon') && this.started && !this.world.inHouse && this.pointers.size === 0 && e.button !== 2) {
         this.holdNdc = this.ndc(e.clientX, e.clientY);
         this.tryFire(this.holdNdc);
         try { c.setPointerCapture(e.pointerId); } catch (err) {}
@@ -4755,7 +4767,32 @@ class Game {
     this.enterBtn = document.createElement('button');
     this.enterBtn.id = 'btn-enter';
     this.enterBtn.textContent = 'ENTER';
-    hud.append(this.joy, this.jumpBtn, this.enterBtn);
+    this.weaponBtn = document.createElement('button');
+    this.weaponBtn.id = 'btn-weapon';
+    this.weaponBtn.type = 'button';
+    this.weaponBtn.textContent = '⚔️';
+    this.weaponBtn.setAttribute('aria-label', 'Weapons');
+    this.weatherBtn = document.createElement('button');
+    this.weatherBtn.id = 'btn-weather';
+    this.weatherBtn.type = 'button';
+    this.weatherBtn.textContent = '🌦️';
+    this.weatherBtn.setAttribute('aria-label', 'Weather');
+    hud.append(this.joy, this.jumpBtn, this.weaponBtn, this.weatherBtn, this.enterBtn);
+    const tapBtn = (el, fn) => {
+      let fromTouch = false;
+      el.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        fromTouch = true;
+        fn();
+      }, { passive: false });
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (fromTouch) { fromTouch = false; return; }
+        fn();
+      });
+    };
+    tapBtn(this.weaponBtn, () => { if (this.started) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon'); });
+    tapBtn(this.weatherBtn, () => { if (this.started) this.setMode(this.mode === 'weather' ? 'explore' : 'weather'); });
     this.joyVec = { x: 0, y: 0 };
 
     const knob = this.joy.querySelector('.knob');
@@ -4926,7 +4963,7 @@ class Game {
   }
 
   touchUi(e) {
-    for (const el of [this.joy, this.jumpBtn, this.enterBtn]) {
+    for (const el of [this.joy, this.jumpBtn, this.weaponBtn, this.weatherBtn, this.enterBtn]) {
       if (!el) continue;
       const r = el.getBoundingClientRect();
       if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return true;

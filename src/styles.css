@@ -260,9 +260,33 @@ body.touch #joystick { display: block; }
 }
 body.touch #btn-jump { display: block; }
 
+#btn-weapon, #btn-weather {
+  position: absolute;
+  right: 24px;
+  width: 84px; height: 84px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.7);
+  font-size: 28px;
+  line-height: 1;
+  display: none;
+  pointer-events: auto;
+}
+#btn-weapon {
+  bottom: 194px;
+  background: rgba(220, 38, 38, .82);
+}
+#btn-weather {
+  bottom: 292px;
+  background: rgba(14, 116, 144, .88);
+}
+#btn-weapon.on, #btn-weather.on {
+  outline: 4px solid #fff;
+}
+body.touch #btn-weapon, body.touch #btn-weather { display: block; }
+
 #btn-enter {
   position: absolute;
-  right: 24px; bottom: 196px;
+  right: 124px; bottom: 108px;
   min-width: 84px; height: 60px;
   padding: 0 16px;
   border-radius: 30px;
