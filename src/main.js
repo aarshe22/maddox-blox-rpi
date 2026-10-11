@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD, isRaspberryPi4, piDefaults } from './options.js?v=15';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD, isRaspberryPi4, piDefaults } from './options.js?v=18';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
@@ -11,6 +11,63 @@ import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=4';
 import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js?v=1';
 import { sigOf, getState, setState, clearState } from './persist.js';
+
+try {
+  const here = new URL(location.href);
+  if (here.searchParams.has('nocache')) {
+    here.searchParams.delete('nocache');
+    history.replaceState(null, '', here.pathname + here.search + here.hash);
+  }
+} catch (e) { /* keep the address as it is */ }
+
+function readImportMap() {
+  const imports = {};
+  document.querySelectorAll('script[type="importmap"]').forEach((node) => {
+    try { Object.assign(imports, JSON.parse(node.textContent).imports || {}); } catch (e) { /* skip */ }
+  });
+  return imports;
+}
+
+function resolveSpec(spec, base, map) {
+  if (map[spec]) return new URL(map[spec], location.href).href;
+  const prefixes = Object.keys(map).filter((key) => key.endsWith('/') && spec.startsWith(key));
+  prefixes.sort((a, b) => b.length - a.length);
+  if (prefixes.length) return new URL(map[prefixes[0]] + spec.slice(prefixes[0].length), location.href).href;
+  if (spec.startsWith('.') || spec.startsWith('/')) return new URL(spec, base).href;
+  return null;
+}
+
+/* Re-fetch the page and its scripts the way a no-cache reload does, then
+   navigate to a fresh address so the browser cannot reuse this document. */
+async function bustFreshAssets() {
+  const map = readImportMap();
+  const seen = new Set();
+  const queue = [location.href.split('#')[0]];
+  document.querySelectorAll('link[rel="stylesheet"][href], script[src]').forEach((el) => {
+    const raw = el.getAttribute('href') || el.getAttribute('src');
+    if (raw && !raw.startsWith('data:')) queue.push(new URL(raw, location.href).href);
+  });
+  const deadline = Date.now() + 8000;
+  while (queue.length && seen.size < 48 && Date.now() < deadline) {
+    const href = queue.shift();
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    let text = '';
+    try {
+      const res = await fetch(href, { cache: 'reload', credentials: 'same-origin' });
+      if (!res.ok) continue;
+      const kind = res.headers.get('content-type') || '';
+      if (!/javascript|ecmascript/i.test(kind) && !/\.js(\?|$)/i.test(href)) continue;
+      text = await res.text();
+    } catch (e) { continue; }
+    const re = /(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = re.exec(text))) {
+      const next = resolveSpec(match[1], href, map);
+      if (next && !seen.has(next)) queue.push(next);
+    }
+  }
+}
 
 /* Propeller course: hole is wider than the body, centered on the cruise chest. */
 /* 500% larger than normal: 100% + 500% = 6×. Weapons and shots use the same factor. */
@@ -3059,10 +3116,7 @@ class Game {
     this.optionsEl.setAttribute('aria-label', 'World options');
     this.panel = buildOptionsPanel(this.world.opts, {
       onOpen: () => { this.keys.clear(); this.pointers.clear(); },
-      onRegen: () => {
-        voice.speak('regenerating maddox blox!');
-        this.regenerateWorld();
-      },
+      onRegen: () => { this.refreshGame(); },
       onSound: (v) => { sfx.setMuted(!v); voice.setEnabled(v); },
       onDebug: (v) => DBG.set(v),
       onResolution: () => this.resize(),
@@ -3277,12 +3331,11 @@ class Game {
       el.className = 'slot';
       el.title = `${w.name} — ${w.dmg} dmg`;
       el.innerHTML = `<span class="key">${i + 1}</span><span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
-      el.addEventListener('pointerdown', (e) => { el._touchPick = e.pointerType === 'touch'; });
       el.addEventListener('click', (e) => {
         e.preventDefault();
         this.setMode('weapon');
         this.confirmWeapon(i + 1);
-        if (el._touchPick || document.body.classList.contains('touch')) this.closeCommandStrip();
+        this.closeCommandStrip();
       });
       this.stripBar.appendChild(el);
       return el;
@@ -3303,11 +3356,10 @@ class Game {
       el.className = 'slot weather-w';
       el.title = w.name;
       el.innerHTML = `<span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
-      el.addEventListener('pointerdown', (e) => { el._touchPick = e.pointerType === 'touch'; });
       el.addEventListener('click', (e) => {
         e.preventDefault();
         this.onWeatherClick(w.id);
-        if (el._touchPick || document.body.classList.contains('touch')) this.closeCommandStrip();
+        this.closeCommandStrip();
       });
       this.stripBar.appendChild(el);
       return el;
@@ -3340,7 +3392,7 @@ class Game {
       const wi = WEATHERS.findIndex((w) => w.id === this.weather);
       this.stripFocus = wi < 0 ? 1 : wi + 1;
       sfx.swap();
-      this.toast('Weather — stick moves, A selects and returns to explore, Y closes', 'good');
+      this.toast('Weather — choose one and you return to explore. Esc closes.', 'good');
       this.refreshStrips();
       return;
     }
@@ -3349,22 +3401,22 @@ class Game {
     sfx.swap();
     if (mode === 'weapon') {
       this.stripFocus = this.equipped == null ? 0 : this.equipped + 1;
-      this.toast('Weapons — stick moves, A selects and returns to explore', 'good');
+      this.toast('Weapons — choose one and you return to explore. A, Enter, or F fires.', 'good');
     }
     else if (mode === 'explore' && !opts.quiet) {
-      const held = this.armedWeapon() ? ` ${this.armedWeapon().name} ready — A or F fires.` : '';
+      const held = this.armedWeapon() ? ` ${this.armedWeapon().name} ready — A, F, or a click fires.` : '';
       this.toast('Explore mode.' + held, 'good');
     }
     this.refreshStrips();
   }
 
-  /* Controller confirm and a touch tap leave the weapon or weather running
-     and hide the strip so A and a screen tap can shoot. */
+  /* A tap, click, key, or controller confirm leaves the weapon or weather
+     running and hides the strip so the next press can shoot. */
   closeCommandStrip() {
     if (this.mode !== 'weapon' && this.mode !== 'weather') return;
     const def = this.mode === 'weapon' ? this.armedWeapon() : null;
     this.setMode('explore', { quiet: true });
-    if (def) this.toast(`${def.name} ready — A or F fires.`, 'good');
+    if (def) this.toast(`${def.name} ready — A, F, or a click fires.`, 'good');
   }
 
 
@@ -3965,6 +4017,13 @@ class Game {
     const cur = this.stripFocus ?? 1;
     this.stripFocus = (cur + dir + n) % n;
     this.refreshStrips();
+  }
+
+  /* Same commit as a controller A press: apply the highlight and return to explore. */
+  confirmOpenStrip() {
+    if (this.mode === 'weapon') this.confirmWeapon(this.stripFocus ?? 0);
+    else if (this.mode === 'weather') this.confirmStrip();
+    this.closeCommandStrip();
   }
 
   confirmStrip() {
@@ -6180,7 +6239,22 @@ class Game {
         return;
       }
       if (e.code === 'F9') { e.preventDefault(); DBG.toggle(); return; }
+      if (e.code === 'Space' && (this.mode === 'weapon' || this.mode === 'weather')) {
+        e.preventDefault();
+        this.confirmOpenStrip();
+        return;
+      }
       if (e.code === 'Space') { e.preventDefault(); this.jumpQueued = 0.16; return; }
+      if ((e.code === 'Enter' || e.code === 'NumpadEnter') && (this.mode === 'weapon' || this.mode === 'weather')) {
+        e.preventDefault();
+        this.confirmOpenStrip();
+        return;
+      }
+      if ((e.code === 'Enter' || e.code === 'NumpadEnter') && this.mode === 'build') {
+        e.preventDefault();
+        this.padUse();
+        return;
+      }
       if (e.code === 'KeyE') { this.toggleDoor(); return; }
       if (e.code === 'Escape') { e.preventDefault(); this.setMode('explore'); return; }
       if (e.code === 'Tab') {
@@ -6200,7 +6274,7 @@ class Game {
         } else {
           this._stripNudgeT = performance.now();
         }
-        this.nudgeStrip(e.code === 'ArrowRight' ? 1 : -1);
+        this.moveStripFocus(e.code === 'ArrowRight' ? 1 : -1);
         return;
       }
       if (map[e.code]) { this.keys.add(map[e.code]); e.preventDefault(); return; }
@@ -6209,9 +6283,15 @@ class Game {
       const n = parseInt(e.key, 10);
       if (Number.isNaN(n)) return;
       if (this.mode === 'weapon') {
-        if (n >= 1 && n <= WEAPONS.length) this.selectWeapon(n - 1);
+        if (n >= 1 && n <= WEAPONS.length) {
+          this.selectWeapon(n - 1);
+          this.closeCommandStrip();
+        }
       } else if (this.mode === 'weather') {
-        if (n >= 1 && n <= WEATHERS.length) this.onWeatherClick(WEATHERS[n - 1].id);
+        if (n >= 1 && n <= WEATHERS.length) {
+          this.onWeatherClick(WEATHERS[n - 1].id);
+          this.closeCommandStrip();
+        }
       } else if (this.mode === 'build') {
         if (n >= 1 && n <= BRICKS.length) this.selectSlot(n - 1);
       }
@@ -6235,17 +6315,21 @@ class Game {
     this.hoverNdc = null;
     c.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch' && this.touchUi(e)) return;
-      const touchShot = e.pointerType === 'touch' && this.mode === 'explore' && !!this.armedWeapon();
-      if ((touchShot || this.mode === 'weapon') && this.started && !this.world.inHouse && this.pointers.size === 0 && e.button !== 2) {
-        this.holdNdc = this.ndc(e.clientX, e.clientY);
-        this.tryFire(this.holdNdc);
-        try { c.setPointerCapture(e.pointerId); } catch (err) {}
-        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), fire: true });
-        return;
-      }
+      const suppress = this._suppressFirePointer === e.pointerId;
+      if (suppress) this._suppressFirePointer = null;
+      const aim = !suppress && e.button !== 2 && this.started && !this.world.inHouse
+        && this.mode === 'explore' && !!this.armedWeapon() && this.pointers.size === 0;
       try { c.setPointerCapture(e.pointerId); } catch (err) {}
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() });
-      if (this.pointers.size === 2) this.pinch = this.pinchDist();
+      this.pointers.set(e.pointerId, {
+        x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
+        t: performance.now(), aim
+      });
+      if (aim) this.holdNdc = this.ndc(e.clientX, e.clientY);
+      if (this.pointers.size === 2) {
+        this.pinch = this.pinchDist();
+        for (const p of this.pointers.values()) p.aim = false;
+        this.holdNdc = null;
+      }
     });
     c.addEventListener('pointermove', (e) => {
       const p = this.pointers.get(e.pointerId);
@@ -6255,7 +6339,13 @@ class Game {
       }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
-      if (p.fire) this.holdNdc = this.ndc(e.clientX, e.clientY);
+      if (p.aim && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 18) p.aim = false;
+      this.holdNdc = null;
+      for (const held of this.pointers.values()) {
+        if (!held.aim) continue;
+        this.holdNdc = this.ndc(held.x, held.y);
+        break;
+      }
       this.orbit.yaw -= dx * 0.0062;
       this.orbit.pitch = clamp(this.orbit.pitch + dy * 0.0055, -0.18, 1.32);
       if (this.pointers.size === 2) {
@@ -6268,7 +6358,14 @@ class Game {
       const p = this.pointers.get(e.pointerId);
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinch = 0;
-      if (p && p.fire) { this.holdNdc = null; sfx.setFlame(false); return; }
+      if (p && p.aim && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) <= 18) this.tryFire(this.ndc(e.clientX, e.clientY));
+      if (p && p.aim) {
+        p.aim = false;
+        this.holdNdc = null;
+        for (const held of this.pointers.values()) {
+          if (held.aim) this.holdNdc = this.ndc(held.x, held.y);
+        }
+      }
       if (!p) return;
       const quick = performance.now() - p.t < 450;
       const still = Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 14;
@@ -6329,6 +6426,7 @@ class Game {
       if (this.stripBar && this.stripBar.contains(e.target)) return;
       if (this.weaponBtn && this.weaponBtn.contains(e.target)) return;
       if (this.weatherBtn && this.weatherBtn.contains(e.target)) return;
+      this._suppressFirePointer = e.pointerId;
       this.setMode('explore');
     }, true);
     this.joyVec = { x: 0, y: 0 };
@@ -6446,10 +6544,39 @@ class Game {
       }
       return;
     }
+    const topL = act('options');
+    const topR = act('regen');
+    let openedOptions = false;
+    if (topL.edge && !topR.down && this.panel) {
+      const wasOpen = this.panel.isOpen;
+      this.panel.toggle();
+      openedOptions = !wasOpen && this.panel.isOpen;
+      if (openedOptions) this.toast('Options — stick moves, A selects, left and right change it, A saves and closes', 'good');
+    }
+    if (topR.edge && !topL.down) this.regenerateFromController();
     if (this.panel?.isOpen) {
       this.padVec.x = 0;
       this.padVec.y = 0;
       this.padFire = false;
+      if (!openedOptions) {
+        let lx = axis(gp.axes[0]);
+        let ly = axis(gp.axes[1]);
+        if (act('forward').down) ly = -1;
+        if (act('backMove').down) ly = 1;
+        if (act('left').down) lx = -1;
+        if (act('right').down) lx = 1;
+        const tap = (slot, on) => {
+          if (!on) { this[slot] = 0; return false; }
+          const now = performance.now();
+          if (this[slot] && now - this[slot] < 180) return false;
+          this[slot] = now;
+          return true;
+        };
+        const dx = tap('_optL', lx < -0.35) ? -1 : tap('_optR', lx > 0.35) ? 1 : 0;
+        const dy = tap('_optU', ly < -0.35) ? -1 : tap('_optD', ly > 0.35) ? 1 : 0;
+        if ((dx || dy) && this.panel.steer) this.panel.steer(dx, dy);
+        if (act('confirm').edge && this.panel.activate) this.panel.activate();
+      }
       if (act('back').edge && this.panel.close) this.panel.close();
       return;
     }
@@ -6493,34 +6620,40 @@ class Game {
     const rightBtn = act('right');
     if (selectMode && (repeat('_padDpadL', leftBtn) || hold('_padStickL', lx < -0.35))) this.moveStripFocus(-1);
     if (selectMode && (repeat('_padDpadR', rightBtn) || hold('_padStickR', lx > 0.35))) this.moveStripFocus(1);
-    const zoomOut = act('zoomOut');
-    const zoomIn = act('zoomIn');
-    const bothZoom = zoomOut.down && zoomIn.down;
-    if (bothZoom && (zoomOut.edge || zoomIn.edge)) this.resetSmallWorld();
-    else if (!bothZoom) {
-      if (zoomOut.down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, this.zoomLimit());
-      if (zoomIn.down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, this.zoomLimit());
-    }
-
     const confirm = act('confirm');
     const armed = this.mode === 'explore' && !!this.armedWeapon();
     if (this.mode === 'explore' && confirm.edge) {
       if (this.doorAction) this.toggleDoor();
       else if (!armed) this.jumpQueued = 0.16;
     }
-    if (this.mode === 'weather' && confirm.edge) {
-      this.confirmStrip();
-      this.closeCommandStrip();
-    }
-    if (this.mode === 'weapon' && confirm.edge) {
-      this.confirmWeapon(this.stripFocus ?? 0);
-      this.closeCommandStrip();
-    }
+    if ((this.mode === 'weather' || this.mode === 'weapon') && confirm.edge) this.confirmOpenStrip();
     if (act('back').edge && selectMode) this.setMode('explore');
     if (act('weapons').edge) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon');
     if (act('weather').edge) this.setMode(this.mode === 'weather' ? 'explore' : 'weather');
     this.padFire = armed && !this.doorAction && confirm.down;
     if (act('use').edge && this.mode === 'build') this.padUse();
+  }
+
+  regenerateFromController() {
+    if (!this.started) return;
+    this.refreshGame();
+  }
+
+  /* Save the current options, wipe this world's damage, re-download the
+     page and scripts, then load them the way a no-cache browser refresh does. */
+  refreshGame() {
+    if (this._refreshing) return;
+    this._refreshing = true;
+    saveOptions(this.world.opts);
+    voice.speak('regenerating maddox blox!');
+    if (this.panel && this.panel.isOpen) this.panel.close();
+    const url = new URL(location.href);
+    url.searchParams.set('nocache', String(Date.now()));
+    const go = () => {
+      clearState(this.world.opts.size);
+      location.replace(url.href);
+    };
+    bustFreshAssets().then(go, go);
   }
 
   padUse() {
@@ -6941,8 +7074,10 @@ class Game {
     DBG.sample();
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.tickWeaponRig(dt);
-    const firing = this.padFire || (this.keyFire && this.mode === 'explore' && !!this.armedWeapon() && !this.world.inHouse);
-    if (firing) this.tryFire({ x: 0, y: 0 });
+    const screenFire = this.mode === 'explore' && !!this.armedWeapon() && !this.world.inHouse
+      && [...this.pointers.values()].some((p) => p.aim);
+    const firing = this.padFire || screenFire || (this.keyFire && this.mode === 'explore' && !!this.armedWeapon() && !this.world.inHouse);
+    if (firing) this.tryFire(screenFire && this.holdNdc ? this.holdNdc : { x: 0, y: 0 });
     sfx.setFlame(firing && this.armedWeapon()?.kind === 'stream');
     this.updateSaucer(dt);
     this.updateBlockShots(dt);
@@ -6954,7 +7089,7 @@ class Game {
     this.updateFalling(dt);
     this.fx.update(dt);
     this._saveT -= dt;
-    if (this._saveT < -1) { this._saveT = 2; this.saveDamage(); }
+    if (this._saveT < -1 && !this._refreshing) { this._saveT = 2; this.saveDamage(); }
     if (!this.world.inHouse && this.started) this.updateWeather(dt);
     this.stars.move(this.player.pos.x, this.player.pos.z);
     if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);

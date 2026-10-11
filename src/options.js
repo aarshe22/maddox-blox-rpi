@@ -200,8 +200,8 @@ export const PAD_ACTIONS = [
   { id: 'back', label: 'Back' },
   { id: 'weapons', label: 'Weapons' },
   { id: 'weather', label: 'Weather' },
-  { id: 'zoomOut', label: 'Zoom out' },
-  { id: 'zoomIn', label: 'Zoom in' },
+  { id: 'options', label: 'Options' },
+  { id: 'regen', label: 'Regenerate & refresh' },
   { id: 'use', label: 'Place a brick' },
   { id: 'forward', label: 'Move forward' },
   { id: 'backMove', label: 'Move back' },
@@ -211,7 +211,7 @@ export const PAD_ACTIONS = [
 
 export const DEFAULT_PAD = {
   confirm: 0, back: 1, weapons: 2, weather: 3,
-  zoomOut: 4, zoomIn: 5, use: 7,
+  options: 4, regen: 5, use: 7,
   forward: 12, backMove: 13, left: 14, right: 15
 };
 
@@ -226,8 +226,11 @@ export function padButtonName(i) {
 function cleanPad(map) {
   const out = { ...DEFAULT_PAD };
   if (!map) return out;
+  const src = { ...map };
+  if (src.options == null && src.zoomOut != null) src.options = src.zoomOut;
+  if (src.regen == null && src.zoomIn != null) src.regen = src.zoomIn;
   for (const a of PAD_ACTIONS) {
-    const n = Number(map[a.id]);
+    const n = Number(src[a.id]);
     if (Number.isInteger(n) && n >= 0 && n < 32) out[a.id] = n;
   }
   return out;
@@ -298,10 +301,10 @@ export function buildOptionsPanel(opts, hooks = {}) {
             </div>
             <p class="o-pad-step" aria-live="polite"></p>
           </div>
-          <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate.</div>
+          <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate. Regenerate also reloads the game with a fresh cache. Controller: stick moves, A selects, left and right change it, A saves and closes. Top L opens this screen. Top R regenerates.</div>
           <div class="o-actions">
             <button type="button" class="o-reset">Reset to defaults</button>
-            <button class="o-regen">♻️ Regenerate world</button>
+            <button class="o-regen">♻️ Regenerate &amp; refresh</button>
           </div>
         </div>
         <div>
@@ -541,6 +544,103 @@ export function buildOptionsPanel(opts, hooks = {}) {
     api.refresh();
     if (hooks.onResolution) hooks.onResolution(opts.resolution);
   });
+
+  const padItems = [
+    { kind: 'choice', el: el.querySelector('.o-res') },
+    { kind: 'choice', el: el.querySelector('.o-size') }
+  ];
+  for (const row of el.querySelectorAll('.o-rows .o-row')) {
+    padItems.push({ kind: 'count', el: row, range: row.querySelector('input[type=range]') });
+  }
+  padItems.push(
+    { kind: 'toggle', el: birdsBtn },
+    { kind: 'toggle', el: sndBtn },
+    { kind: 'toggle', el: dbgBtn },
+    { kind: 'action', el: copyBtn, close: true },
+    { kind: 'action', el: padGo, close: false },
+    { kind: 'action', el: el.querySelector('.o-pad-std'), close: true },
+    { kind: 'action', el: el.querySelector('.o-reset'), close: true },
+    { kind: 'action', el: el.querySelector('.o-regen'), close: false },
+    { kind: 'action', el: el.querySelector('.o-x'), close: false }
+  );
+  api.focus = 0;
+  api.adjusting = false;
+
+  function paintPad() {
+    el.querySelectorAll('.o-pad-focus').forEach((node) => node.classList.remove('o-pad-focus', 'o-pad-adjust'));
+    const item = padItems[api.focus];
+    if (!item || !api.isOpen) return;
+    item.el.classList.add('o-pad-focus');
+    if (api.adjusting) item.el.classList.add('o-pad-adjust');
+  }
+
+  function movePad(dir) {
+    if (!padItems.length) return;
+    api.adjusting = false;
+    api.focus = (api.focus + dir + padItems.length) % padItems.length;
+    paintPad();
+  }
+
+  function cycleChoice(item, dir) {
+    const btns = [...item.el.querySelectorAll('button')].filter((b) => !b.disabled);
+    if (!btns.length) return;
+    let i = btns.findIndex((b) => b.classList.contains('active'));
+    if (i < 0) i = 0;
+    btns[(i + dir + btns.length) % btns.length].click();
+  }
+
+  function nudgePad(dir) {
+    const item = padItems[api.focus];
+    if (!item) return;
+    if (!api.adjusting) { movePad(dir); return; }
+    if (item.kind === 'choice') cycleChoice(item, dir);
+    else if (item.kind === 'count') {
+      const range = item.range;
+      const next = Math.max(+range.min, Math.min(+range.max, Math.round(+range.value) + dir));
+      range.value = String(next);
+      range.dispatchEvent(new Event('input'));
+    } else if (item.kind === 'toggle') item.el.click();
+  }
+
+  api.steer = (dx, dy) => {
+    if (api.adjusting) {
+      if (dx) nudgePad(dx);
+      if (dy) movePad(dy);
+      return;
+    }
+    if (dy) movePad(dy);
+    else if (dx) movePad(dx);
+  };
+  api.activate = () => {
+    const item = padItems[api.focus];
+    if (!item) return;
+    if (item.kind === 'action') {
+      item.el.click();
+      if (item.close && api.isOpen) api.close();
+      return;
+    }
+    if (!api.adjusting) {
+      api.adjusting = true;
+      paintPad();
+      return;
+    }
+    saveOptions(opts);
+    api.close();
+  };
+
+  const openPad = api.open;
+  api.open = () => {
+    api.focus = 0;
+    api.adjusting = false;
+    openPad();
+    paintPad();
+  };
+  const closePad = api.close;
+  api.close = () => {
+    api.adjusting = false;
+    closePad();
+    el.querySelectorAll('.o-pad-focus').forEach((node) => node.classList.remove('o-pad-focus', 'o-pad-adjust'));
+  };
 
   el.querySelector('.o-x').addEventListener('click', () => api.close());
   window.addEventListener('resize', () => { if (api.isOpen) fitCard(); });

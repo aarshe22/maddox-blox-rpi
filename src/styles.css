@@ -401,6 +401,8 @@ body.touch #btn-options { top: 10px; right: 24px; }
 }
 #options .o-seg button.active { background: #2f7de1; border-color: #1b5cb4; color: #fff; }
 #options .o-seg button:disabled { opacity: 0.38; cursor: default; }
+#options .o-pad-focus { outline: 3px solid #2f7de1; outline-offset: 2px; border-radius: 10px; }
+#options .o-pad-adjust { outline-color: #f5aa0f; }
 #options .o-rows .o-row {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(72px, 1fr) 2.4ch auto;

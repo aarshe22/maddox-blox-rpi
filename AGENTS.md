@@ -16,7 +16,7 @@ Git remote: `https://github.com/aarshe22/maddox-blox-rpi.git`, branch `main`. Li
 
 Safari and the live nginx cache unchanged URLs. Bump the query string, and never set a version backward. An unversioned `import` stays stale: version it inside the parent module and bump the parent's query in `index.html`. The stylesheet is `src/styles.css`, not a repo-root file.
 
-Current queries: `src/styles.css?v=17`, `src/main.js?v=52`, and inside `main.js`: `options.js?v=15`, `weaponry.js?v=16`, `sfx.js?v=14`, `voice.js?v=1`, `life.js?v=4`, `weather.js?v=1`.
+Current queries: `src/styles.css?v=18`, `src/main.js?v=56`, and inside `main.js`: `options.js?v=18`, `weaponry.js?v=16`, `sfx.js?v=14`, `voice.js?v=1`, `life.js?v=4`, `weather.js?v=1`.
 
 ## Deploy
 
@@ -28,7 +28,7 @@ Pi kiosk: LibreELEC on a Raspberry Pi 4, hostname `libreelec-munro`. Do not SSH 
 
 `src/options.js`. Persistence key `maddox-blox-options-pi2`.
 
-Map sizes are real half-extents: Tiny 44, Small 60, Large 96, Huge 144, hard cap 160. Each `SIZES` entry has its own `counts`. Picking a size replaces `opts.counts` and `opts.enabled`. `World.count()` returns that slider value clamped 0..900. There is no hidden tree or flower multiplier. Reset restores Tiny counts, size, and resolution. It does not reset sound, birds, debug, or the controller map. Both bumpers call `resetSmallWorld()` and force Small, except on a Pi 4.
+Map sizes are real half-extents: Tiny 44, Small 60, Large 96, Huge 144, hard cap 160. Each `SIZES` entry has its own `counts`. Picking a size replaces `opts.counts` and `opts.enabled`. `World.count()` returns that slider value clamped 0..900. There is no hidden tree or flower multiplier. Reset restores Tiny counts, size, and resolution. It does not reset sound, birds, debug, or the controller map. The mapped Options button (top L, default LB) opens Options. The mapped Regenerate button (top R, default RB) saves, clears that world's damage, and reloads the page with a fresh cache. Scroll and pinch still zoom.
 
 Resolution: Low 640×360 (default), Medium 1280×720, High 1920×1080. `resize()` uses `resolutionSize` and `setSize(w, h, false)`.
 
@@ -50,7 +50,7 @@ Damage and flow live in `Game` (`src/main.js`). `src/weather.js` is the conditio
 
 UFO and tornado are toggles. Selecting either again sends it away. Selecting it while it is leaving starts a fresh one. Hurricane is not a toggle. `F` (`KeyF`) fires the equipped weapon in explore mode when the player is outdoors. It is not a movement key. Scenarios are not `armedWeapon()`, so `F` does not launch them.
 
-`closeCommandStrip()` returns to explore without clearing the equipped weapon or the active weather. Gamepad A on a weapon or weather highlight does this. A touch tap on either strip does this (`pointerType === 'touch'` or `body.touch`). The confirming press does not fire. The next A or F press does, and a screen tap fires in explore. A desktop mouse click leaves the strip open. `body.touch` is also set when `maxTouchPoints > 0`, so some laptops follow the touch path.
+`closeCommandStrip()` returns to explore without clearing the equipped weapon or the active weather. A click, a tap, a number key, Enter, Space, and gamepad A all do this while a strip is open. Arrows and the stick only move the highlight. The confirming press does not fire. After that, A, F, and a still click or hold on the world fire a shootable weapon. A drag past 18px is a look, not a shot. Enter in build mode places a brick at the center of the view, the same as the controller place button. The controller's top L button (LB) opens Options. Top R (RB) regenerates the world and reloads the page with a fresh cache, the same as the Regenerate & refresh button. In Options the stick moves, A selects a setting, left and right change it, and A saves and closes.
 
 ## Materials
 

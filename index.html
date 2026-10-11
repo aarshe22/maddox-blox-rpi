@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
-<link rel="stylesheet" href="src/styles.css?v=17" />
+<link rel="stylesheet" href="src/styles.css?v=18" />
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -100,8 +100,8 @@ try {
   </script>
 
   <div class="panel" id="panel-hint">
-    <div id="hint-desktop">WASD move · drag look · Space jump · F shoot · E doors · Esc explore · B build · V weapon · C weather · ⚙️ options</div>
-    <div id="hint-touch">drag right = look · pad = move · JUMP · ⚔️ weapons · 🌦️ weather · tap a tile, then tap the world to shoot · ENTER doors</div>
+    <div id="hint-desktop">WASD move · drag look · Space jump · F or click shoots · E doors · Esc explore · B build · V weapon · C weather · ⚙️ options</div>
+    <div id="hint-touch">drag to look · pad moves · JUMP · ⚔️ weapons · 🌦️ weather · tap a tile, then hold the world to shoot · ENTER doors</div>
   </div>
 </div>
 
@@ -114,7 +114,7 @@ try {
     <p>A brick-toy sandbox. Gather loose bricks, build whatever you like,
        and repair the broken rainbow bridge.</p>
     <ul>
-      <li><b>WASD / arrows</b> move · <b>Space</b> jump · <b>F</b> shoot the equipped weapon · <b>E</b> enter/exit house doors</li>
+      <li><b>WASD / arrows</b> move · <b>Space</b> jump · <b>F or click</b> shoots the equipped weapon · <b>E</b> enter/exit house doors</li>
       <li><b>Drag</b> to orbit the camera · <b>scroll / pinch</b> to zoom</li>
       <li><b>Click / tap</b> to place a brick · <b>X</b> or remove-slot tap to break bricks</li>
       <li><b>1-6</b> pick a brick type</li>
@@ -143,7 +143,7 @@ try {
     document.head.appendChild(map);
     var app = document.createElement('script');
     app.type = 'module';
-    app.src = 'src/main.js?v=52';
+    app.src = 'src/main.js?v=56';
     document.body.appendChild(app);
   }
   async function localThreeExists() {
