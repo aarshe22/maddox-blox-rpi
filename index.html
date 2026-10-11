@@ -6,14 +6,6 @@
 <link rel="icon" type="image/png" href="assets/favicon.png">
   <title>Maddox Blox</title>
 <link rel="stylesheet" href="src/styles.css" />
-<script type="importmap">
-{
-  "imports": {
-    "three": "./node_modules/three/build/three.module.js",
-    "three/addons/": "./node_modules/three/examples/jsm/"
-  }
-}
-</script>
 </head>
 <body>
 <canvas id="scene"></canvas>
@@ -55,7 +47,37 @@
   </div>
 </div>
 
-<script type="module" src="src/main.js"></script>
+<script>
+/* Pi keeps three in node_modules. A host without that folder loads the same release from a CDN. */
+(function () {
+  if (location.protocol === 'file:') return;
+  var localThree = './node_modules/three/build/three.module.js';
+  var localAddons = './node_modules/three/examples/jsm/';
+  var cdnThree = 'https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js';
+  var cdnAddons = 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/';
+  function installMap(three, addons) {
+    var map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({
+      imports: { three: three, 'three/addons/': addons }
+    });
+    document.head.appendChild(map);
+    var app = document.createElement('script');
+    app.type = 'module';
+    app.src = 'src/main.js';
+    document.body.appendChild(app);
+  }
+  (async function () {
+    try {
+      var res = await fetch(localThree, { method: 'HEAD' });
+      if (!res.ok) throw new Error('three missing');
+      installMap(localThree, localAddons);
+    } catch (err) {
+      installMap(cdnThree, cdnAddons);
+    }
+  })();
+})();
+</script>
 <script>
 /* A file:// page cannot load the module above. Say so on the title screen. */
 if (location.protocol === 'file:') {
