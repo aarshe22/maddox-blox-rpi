@@ -4,7 +4,7 @@ import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addB
 import { makeInterior } from './interior.js';
 import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset } from './options.js';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
-import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
+import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
 import { sfx } from './sfx.js';
 import { voice } from './voice.js';
 import { Life } from './life.js';
@@ -86,6 +86,7 @@ const STRIP_PICS = {
   mg: stripPic('<rect x="6" y="28" width="34" height="10" rx="2" fill="#3a4250" stroke="#243044" stroke-width="3"/><rect x="38" y="30" width="20" height="5" fill="#22262c" stroke="#243044" stroke-width="2"/><rect x="14" y="38" width="8" height="14" rx="1" fill="#8a5a32" stroke="#243044" stroke-width="2"/><rect x="20" y="18" width="12" height="10" rx="1" fill="#5c6778" stroke="#243044" stroke-width="2"/>'),
   flame: stripPic('<path d="M32 4c8 10 6 16 10 22 4 6 8 10 8 18a18 18 0 1 1-36 0c0-8 6-12 10-18 4-6 4-12 8-22z" fill="#ff7a18" stroke="#243044" stroke-width="3"/><path d="M32 24c4 6 4 10 6 14a10 10 0 1 1-12 0c2-4 2-8 6-14z" fill="#ffe14a"/>'),
   rpg: stripPic('<rect x="6" y="26" width="40" height="14" rx="4" fill="#3d8f4a" stroke="#243044" stroke-width="3"/><path d="M44 22l14 11-14 11z" fill="#e23b2f" stroke="#243044" stroke-width="3"/><rect x="16" y="40" width="8" height="14" rx="2" fill="#5c4632" stroke="#243044" stroke-width="2"/>'),
+  ufo: stripPic('<ellipse cx="32" cy="38" rx="26" ry="8" fill="#d5dbe4" stroke="#243044" stroke-width="3"/><path d="M18 36a14 12 0 0 1 28 0z" fill="#8fd0ff" stroke="#243044" stroke-width="3"/><circle cx="26" cy="30" r="2.2" fill="#243044"/><circle cx="32" cy="28" r="2.2" fill="#243044"/><circle cx="38" cy="30" r="2.2" fill="#243044"/><ellipse cx="32" cy="42" rx="8" ry="2.5" fill="#3dce55"/>'),
   clear: stripPic('<circle cx="32" cy="32" r="14" fill="#ffd23f" stroke="#243044" stroke-width="3"/><g stroke="#ffd23f" stroke-width="4" stroke-linecap="round"><path d="M32 6v8M32 50v8M6 32h8M50 32h8M13 13l6 6M45 45l6 6M13 51l6-6M45 19l6-6"/></g>'),
   morning: stripPic('<rect x="4" y="36" width="56" height="20" rx="4" fill="#ffb066"/><path d="M8 40a24 24 0 0 1 48 0z" fill="#ffd23f" stroke="#243044" stroke-width="3"/>'),
   noon: stripPic('<circle cx="32" cy="32" r="16" fill="#ffe14a" stroke="#243044" stroke-width="3"/><g stroke="#ff9f1c" stroke-width="5" stroke-linecap="round"><path d="M32 4v8M32 52v8M4 32h8M52 32h8M12 12l6 6M46 46l6 6M12 52l6-6M46 18l6-6"/></g>'),
@@ -2620,6 +2621,7 @@ class Game {
     this.boltT = 0;
     this.holdNdc = null;
     this.rockets = [];
+    this.saucer = null;
     this.fireballs = [];
     this.meteors = [];
     this._falling = [];
@@ -3168,6 +3170,11 @@ class Game {
     // projectiles follow the body heading, flat-horizontal
     const aim = fwd.clone();
 
+    if (def.kind === 'ufo') {
+      if (!this.saucer) this.launchSaucer();
+      this._swing(0.4);
+      return true;
+    }
     if (def.kind === 'rocket') {
       sfx.launch();
       const mesh = makeRocketMesh();
@@ -3553,6 +3560,80 @@ class Game {
     }
   }
 
+  launchSaucer() {
+    const mesh = makeSaucerMesh();
+    mesh.scale.setScalar(4.4);
+    const p = this.player.pos;
+    mesh.position.set(p.x - 16, 34, p.z - 10);
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.5, 3.4, 1, 12, 1, true),
+      mkMat(0x7dff6a, { transparent: true, opacity: 0.34, depthWrite: false, side: THREE.DoubleSide })
+    );
+    beam.castShadow = false;
+    beam.receiveShadow = false;
+    this.scene.add(mesh);
+    this.scene.add(beam);
+    this.saucer = { mesh, beam, t: 0 };
+    sfx.launch();
+    this.toast('Saucer inbound — it beams up people and animals', 'good');
+  }
+
+  clearSaucer() {
+    const s = this.saucer;
+    if (!s) return;
+    this.scene.remove(s.mesh);
+    this.scene.remove(s.beam);
+    this.saucer = null;
+  }
+
+  updateSaucer(dt) {
+    const s = this.saucer;
+    if (!s) return;
+    s.t += dt;
+    const hover = 16;
+    s.mesh.position.y += (hover - s.mesh.position.y) * Math.min(1, dt * 0.7);
+    s.mesh.rotation.y += dt * 0.8;
+    const homeX = this.player.pos.x;
+    const homeZ = this.player.pos.z;
+    s.mesh.position.x += (homeX - s.mesh.position.x) * Math.min(1, dt * 0.35);
+    s.mesh.position.z += (homeZ - s.mesh.position.z) * Math.min(1, dt * 0.35);
+    const gy = 0.15;
+    const h = Math.max(0.4, s.mesh.position.y - gy);
+    s.beam.scale.set(1, h, 1);
+    s.beam.position.set(s.mesh.position.x, gy + h / 2, s.mesh.position.z);
+    s.beam.material.opacity = 0.26 + Math.sin(s.t * 7) * 0.1;
+    let left = 0;
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || c.hp == null) continue;
+        left++;
+        c.abduct = true;
+        const m = c.mesh;
+        const dx = s.mesh.position.x - m.position.x;
+        const dz = s.mesh.position.z - m.position.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        if (dist > 1.4) {
+          const step = Math.min(dist, 8 * dt);
+          m.position.x += (dx / dist) * step;
+          m.position.z += (dz / dist) * step;
+        }
+        m.position.y += (5 + Math.min(12, dist * 0.35)) * dt;
+        m.rotation.y += dt * 5;
+        if (m.position.y >= s.mesh.position.y - 1.4) {
+          c.alive = false;
+          c.hp = 0;
+          m.visible = false;
+          left--;
+        }
+      }
+    }
+    if (left === 0 && s.t > 1.2) {
+      s.mesh.position.y += dt * 14;
+      s.beam.material.opacity *= 0.9;
+      if (s.mesh.position.y > 55) this.clearSaucer();
+    }
+  }
+
   updateRockets(dt) {
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const r = this.rockets[i];
@@ -3660,6 +3741,7 @@ class Game {
     this.stripFocus = 0;
     if (this.weaponModels) this.showWeaponModel();
     this.defuseNuke();
+    this.clearSaucer();
     for (const list of [this.rockets, this.fireballs, this.meteors, this._falling]) {
       if (!list) continue;
       for (const o of list) if (o.mesh) this.scene.remove(o.mesh);
@@ -3670,6 +3752,7 @@ class Game {
   }
 
   regenerateWorld() {
+    this.clearSaucer();
     if (this.life) { this.life.dispose(); }
     if (this.train) { this.train.dispose(); this.train = null; }
     clearState(this.world.opts.size); // mammoth reset: regenerate wipes all damage
@@ -4409,6 +4492,7 @@ class Game {
     const firing = this.mode === 'weapon' && ((this.holdNdc && this.pointers.size > 0) || this.padFire);
     if (firing) this.tryFire(this.holdNdc && this.pointers.size > 0 ? this.holdNdc : { x: 0, y: 0 });
     sfx.setFlame(firing && WEAPONS[this.weapon]?.kind === 'stream');
+    this.updateSaucer(dt);
     this.updateRockets(dt);
     this.updateFireballs(dt);
     this.updateNuke(dt);

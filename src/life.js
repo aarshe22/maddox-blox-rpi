@@ -499,7 +499,7 @@ export class Life {
   update(dt) {
     const w = this.world;
     for (const c of this.creatures) {
-      if (!c.alive) continue;
+      if (!c.alive || c.abduct) continue;
       c.t += dt;
       const m = c.mesh;
 

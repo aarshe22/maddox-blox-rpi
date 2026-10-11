@@ -8,7 +8,8 @@ export const WEAPONS = [
   { id: 'hammer', name: 'Brick Hammer', icon: '🔨', dmg: 50,  radius: 1.0, maxBreak: 3, range: 3.0, arc: 1.40, cd: 0.95, kind: 'melee' },
   { id: 'mg',     name: 'Machine Gun',  icon: '🔫', dmg: 9,   radius: 0.4, maxBreak: 1, range: 34,  cd: 0.08, kind: 'gun' },
   { id: 'flame',  name: 'Flamethrower', icon: '🔥', dmg: 8,   radius: 1.4, maxBreak: 3, range: 7.5, cd: 0.1,  kind: 'stream', ignite: true },
-  { id: 'rpg',    name: 'Shoulder RPG', icon: '🚀', dmg: 150, radius: 5.2, maxBreak: 6, range: 70,  cd: 1.8, kind: 'rocket', ignite: true }
+  { id: 'rpg',    name: 'Shoulder RPG', icon: '🚀', dmg: 150, radius: 5.2, maxBreak: 6, range: 70,  cd: 1.8, kind: 'rocket', ignite: true },
+  { id: 'ufo',    name: 'UFO',          icon: '🛸', dmg: 0,   radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'ufo' }
 ];
 
 /* -------------------------------------------------------------------- FX */
@@ -163,8 +164,29 @@ export function buildWeaponModels() {
   r.rotation.y = Math.PI; // tube muzzle faces -Z, not the shooter's back
   out.rpg = r;
 
+  const u = makeSaucerMesh();
+  u.scale.setScalar(0.42);
+  out.ufo = u;
+
   for (const grp of Object.values(out)) grp.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   return out;
+}
+
+export function makeSaucerMesh() {
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(CY, mkMat(0xd5dbe4));
+  hull.scale.set(1.7, 0.16, 1.7);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.52, 10, 8), mkMat(0x8fd0ff, { transparent: true, opacity: 0.9 }));
+  dome.scale.set(1, 0.62, 1);
+  dome.position.y = 0.26;
+  const rim = new THREE.Mesh(CY, mkMat(0x3dce55));
+  rim.scale.set(1.85, 0.05, 1.85);
+  const lamp = new THREE.Mesh(CY, mkMat(0xfff2a0));
+  lamp.scale.set(0.28, 0.06, 0.28);
+  lamp.position.y = -0.12;
+  g.add(hull, dome, rim, lamp);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
 }
 
 export function makeRocketMesh() {
