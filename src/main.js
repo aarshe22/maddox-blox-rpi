@@ -83,6 +83,7 @@ function stripPic(body) {
 const STRIP_PICS = {
   sword: stripPic('<path d="M40 4l16 16L28 48l-8 8-10-10 8-8z" fill="#e7eef6" stroke="#243044" stroke-width="3"/><path d="M40 4l8 8-24 24-8-8z" fill="#8fd0ff"/><rect x="8" y="44" width="18" height="7" rx="2" transform="rotate(-45 17 47)" fill="#e2b43a" stroke="#243044" stroke-width="2"/>'),
   hammer: stripPic('<rect x="28" y="26" width="8" height="32" rx="2" fill="#8a5a32" stroke="#243044" stroke-width="2"/><rect x="10" y="8" width="44" height="18" rx="4" fill="#8d97a6" stroke="#243044" stroke-width="3"/><rect x="14" y="12" width="36" height="5" rx="2" fill="#d5dbe4"/>'),
+  mg: stripPic('<rect x="6" y="28" width="34" height="10" rx="2" fill="#3a4250" stroke="#243044" stroke-width="3"/><rect x="38" y="30" width="20" height="5" fill="#22262c" stroke="#243044" stroke-width="2"/><rect x="14" y="38" width="8" height="14" rx="1" fill="#8a5a32" stroke="#243044" stroke-width="2"/><rect x="20" y="18" width="12" height="10" rx="1" fill="#5c6778" stroke="#243044" stroke-width="2"/>'),
   flame: stripPic('<path d="M32 4c8 10 6 16 10 22 4 6 8 10 8 18a18 18 0 1 1-36 0c0-8 6-12 10-18 4-6 4-12 8-22z" fill="#ff7a18" stroke="#243044" stroke-width="3"/><path d="M32 24c4 6 4 10 6 14a10 10 0 1 1-12 0c2-4 2-8 6-14z" fill="#ffe14a"/>'),
   rpg: stripPic('<rect x="6" y="26" width="40" height="14" rx="4" fill="#3d8f4a" stroke="#243044" stroke-width="3"/><path d="M44 22l14 11-14 11z" fill="#e23b2f" stroke="#243044" stroke-width="3"/><rect x="16" y="40" width="8" height="14" rx="2" fill="#5c4632" stroke="#243044" stroke-width="2"/>'),
   clear: stripPic('<circle cx="32" cy="32" r="14" fill="#ffd23f" stroke="#243044" stroke-width="3"/><g stroke="#ffd23f" stroke-width="4" stroke-linecap="round"><path d="M32 6v8M32 50v8M6 32h8M50 32h8M13 13l6 6M45 45l6 6M13 51l6-6M45 19l6-6"/></g>'),
@@ -3143,6 +3144,15 @@ class Game {
     });
   }
 
+  propForSolid(solid) {
+    if (!solid) return null;
+    for (const p of this.world.props) {
+      if (p.gone) continue;
+      for (const pt of p.parts) if (pt.solid === solid) return p;
+    }
+    return null;
+  }
+
   /* ---------------------------------------------------------- attacks */
   tryFire(ndc) {
     if (this.mode !== 'weapon' || !this.started) return false;
@@ -3167,23 +3177,68 @@ class Game {
       this.scene.add(mesh);
       // straight forward + horizontal; a gentle 1.0 m/s^2 lift arches it slightly
       this.rockets.push({ mesh, vel: aim.clone().multiplyScalar(26).setY(0.35),
-        life: def.range / 26, kind: 'rocket' });
+        life: def.range / 26, kind: 'rocket', def });
       this.fx.spawn(muzzle.x, muzzle.y, muzzle.z, 'smoke', 8);
       this._swing(0.5);
       return true;
     }
+    if (def.kind === 'gun') {
+      sfx.gun();
+      const muzzle = chest.clone().addScaledVector(aim, 0.85);
+      const shot = aim.clone();
+      shot.x += (Math.random() - 0.5) * 0.05;
+      shot.y += (Math.random() - 0.5) * 0.03;
+      shot.z += (Math.random() - 0.5) * 0.05;
+      shot.normalize();
+      const hit = this.rayScene(muzzle, shot, def.range);
+      const body = this.life && this.life.rayHit(muzzle, shot, def.range);
+      if (body && (!hit.solid || body.t < hit.t)) {
+        const at = body.c.mesh.position;
+        this.fx.spawn(muzzle.x, muzzle.y, muzzle.z, 'spark', 2);
+        this.fx.spawn(at.x, at.y + 0.5, at.z, 'debris', 4);
+        this.life.hurt(body.c, def.dmg);
+        this._swing(0.12);
+        return true;
+      }
+      const end = muzzle.clone().addScaledVector(shot, hit.solid ? hit.t : def.range);
+      this.fx.spawn(muzzle.x, muzzle.y, muzzle.z, 'spark', 2);
+      this.fx.spawn(end.x, end.y, end.z, hit.solid ? 'debris' : 'spark', 3);
+      const prop = this.propForSolid(hit.solid);
+      if (prop) this.world.applyHit(prop, def.dmg, end);
+      this._swing(0.12);
+      return true;
+    }
     if (def.kind === 'stream') {
-      if (!this.fireballs) this.fireballs = [];
       sfx.fireTick();
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
-        mkMat(0xff8c1a, { emissive: 0xff5500, emissiveIntensity: 1 }));
-      const muzzle = chest.clone().addScaledVector(aim, 0.75).add(new THREE.Vector3(0, 0.25, 0));
-      ball.position.copy(muzzle);
-      this.scene.add(ball);
-      // lob forward with an upward arc: 10 m/s horizontal, 6.5 m/s up
-      this.fireballs.push({ mesh: ball, vel: aim.clone().multiplyScalar(10).setY(6.5), life: 4 });
-      this.fx.spawn(muzzle.x, muzzle.y, muzzle.z, 'fire', 4);
-      this._swing(0.35);
+      const muzzle = chest.clone().addScaledVector(aim, 0.7).add(new THREE.Vector3(0, 0.15, 0));
+      for (let i = 1; i <= 5; i++) {
+        const q = muzzle.clone().addScaledVector(aim, i * (def.range / 5));
+        q.x += (Math.random() - 0.5) * 0.28 * i;
+        q.y += (Math.random() - 0.2) * 0.18 * i;
+        q.z += (Math.random() - 0.5) * 0.28 * i;
+        this.fx.spawn(q.x, q.y, q.z, 'fire', 2);
+      }
+      let hits = 0;
+      for (const prop of this.world.props) {
+        if (prop.gone || hits >= def.maxBreak) continue;
+        const pt = this.world.hitPoint(prop, muzzle);
+        const dxz = new THREE.Vector2(pt.x - p.x, pt.z - p.z);
+        const dist = dxz.length();
+        if (dist > def.range || dist < 0.35) continue;
+        const dxzN = dxz.clone().normalize();
+        const cos = dxzN.x * fwd.x + dxzN.y * fwd.z;
+        if (Math.acos(clamp(cos, -1, 1)) > 0.5) continue;
+        this.world.applyHit(prop, def.dmg, pt);
+        this.fx.spawn(pt.x, pt.y, pt.z, 'fire', 3);
+        hits++;
+      }
+      if (this.life) {
+        for (const c of this.life.inFront(p.x, p.z, fwd, def.range, 1.0)) {
+          this.life.hurt(c, def.dmg);
+          this.fx.spawn(c.mesh.position.x, c.mesh.position.y + 0.4, c.mesh.position.z, 'fire', 3);
+        }
+      }
+      this._swing(0.16);
       return true;
     }
     // melee
@@ -3199,6 +3254,12 @@ class Game {
       this.world.applyHit(prop, def.dmg, pt);
       this.fx.spawn(pt.x, pt.y, pt.z, 'debris', 8);
       hits++;
+    }
+    if (this.life) {
+      for (const c of this.life.inFront(p.x, p.z, fwd, def.range, def.arc)) {
+        this.life.hurt(c, def.dmg);
+        this.fx.spawn(c.mesh.position.x, c.mesh.position.y + 0.4, c.mesh.position.z, 'debris', 5);
+      }
     }
     this.bricksInRadius(chest.clone().addScaledVector(fwd, def.range * 0.7), def.radius + 1.1, (rec) => {
       if (rec._dmg >= 25) return;
@@ -3226,6 +3287,15 @@ class Game {
       n++;
     }
     this.bricksInRadius(at, def.radius, (rec) => this.hurtBrick(rec, def.dmg));
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (!c.alive || c.hp == null) continue;
+        const dist = Math.hypot(c.mesh.position.x - at.x, c.mesh.position.z - at.z);
+        if (dist > def.radius + 1.2) continue;
+        const falloff = 1 - clamp(dist / (def.radius + 1.2), 0, 0.85);
+        this.life.hurt(c, def.dmg * falloff);
+      }
+    }
     const pp = this.player.pos;
     if (at.distanceTo(new THREE.Vector3(pp.x, pp.y + 1, pp.z)) < def.radius + 1.5) {
       const push = new THREE.Vector3(pp.x - at.x, 0, pp.z - at.z).normalize().multiplyScalar(9);
@@ -3501,7 +3571,7 @@ class Game {
         r.mesh.position.copy(ro).addScaledVector(rd, Math.max(0.05, hit.t - 0.05));
       } else if (r.life <= 0 || r.mesh.position.y < -2) boom = true;
       if (boom) {
-        this.explode(r.mesh.position.clone(), WEAPONS[3]);
+        this.explode(r.mesh.position.clone(), r.def || WEAPONS.find((w) => w.id === 'rpg'));
         this.scene.remove(r.mesh);
         this.rockets.splice(i, 1);
       }
@@ -3511,7 +3581,7 @@ class Game {
   /* Lobbed fireballs: gravity arc, detonate on terrain/props/timeout. */
   updateFireballs(dt) {
     if (!this.fireballs || !this.fireballs.length) return;
-    const def = { ...WEAPONS[2], radius: 2.6, dmg: 30, maxBreak: 4 };
+    const flameDef = WEAPONS.find((w) => w.id === 'flame');
     for (let i = this.fireballs.length - 1; i >= 0; i--) {
       const b = this.fireballs[i];
       b.vel.y -= 9.8 * dt;
@@ -3528,7 +3598,7 @@ class Game {
         (groundY > -Infinity && b.mesh.position.y + b.vel.y * dt <= groundY + 0.05) ||
         b.mesh.position.y < -2;
       if (boom) {
-        this.explode(b.mesh.position.clone(), def);
+        this.explode(b.mesh.position.clone(), b.def || flameDef);
         this.scene.remove(b.mesh);
         this.fireballs.splice(i, 1);
       }
@@ -4336,8 +4406,9 @@ class Game {
     DBG.sample();
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.tickWeaponRig(dt);
-    if (this.mode === 'weapon' && this.holdNdc && this.pointers.size > 0) this.tryFire(this.holdNdc);
-    else if (this.mode === 'weapon' && this.padFire) this.tryFire({ x: 0, y: 0 });
+    const firing = this.mode === 'weapon' && ((this.holdNdc && this.pointers.size > 0) || this.padFire);
+    if (firing) this.tryFire(this.holdNdc && this.pointers.size > 0 ? this.holdNdc : { x: 0, y: 0 });
+    sfx.setFlame(firing && WEAPONS[this.weapon]?.kind === 'stream');
     this.updateRockets(dt);
     this.updateFireballs(dt);
     this.updateNuke(dt);

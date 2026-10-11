@@ -49,7 +49,8 @@ export function defaultOptions() {
     enabled,
     sound: true,
     debug: false,
-    life: { animals: false, birds: false, balloons: false }
+    life: { animals: true, birds: true, balloons: false },
+    lifeRev: 1
   };
 }
 
@@ -61,9 +62,12 @@ export function loadOptions() {
     if (SIZES.some((s) => s.id === raw.size)) o.size = raw.size;
     if (typeof raw.sound === 'boolean') o.sound = raw.sound;
     if (typeof raw.debug === 'boolean') o.debug = raw.debug;
+    const keepLife = raw.lifeRev === 1;
     if (raw.life && typeof raw.life === 'object') {
       for (const k of ['animals', 'birds', 'balloons']) {
-        if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
+        if (k === 'balloons' || keepLife) {
+          if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
+        }
       }
     }
     for (const t of OBJECT_TYPES) {
@@ -71,6 +75,7 @@ export function loadOptions() {
       if (typeof c === 'number' && isFinite(c)) o.counts[t.id] = Math.max(0, Math.min(t.max, Math.round(c)));
       if (typeof raw.enabled[t.id] === 'boolean') o.enabled[t.id] = raw.enabled[t.id];
     }
+    if (!keepLife) saveOptions(o);
   } catch (e) { /* corrupted storage: defaults */ }
   return o;
 }

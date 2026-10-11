@@ -6,7 +6,8 @@ import { BR, CY, mkMat, clamp } from './brickkit.js';
 export const WEAPONS = [
   { id: 'sword',  name: 'Brick Sword',  icon: '🗡️', dmg: 20,  radius: 0.6, maxBreak: 2, range: 2.7, arc: 1.25, cd: 0.55, kind: 'melee' },
   { id: 'hammer', name: 'Brick Hammer', icon: '🔨', dmg: 50,  radius: 1.0, maxBreak: 3, range: 3.0, arc: 1.40, cd: 0.95, kind: 'melee' },
-  { id: 'flame',  name: 'Flamethrower', icon: '🔥', dmg: 7,   radius: 0.8, maxBreak: 1, range: 8.0, cd: 0.3,  kind: 'stream', ignite: true },
+  { id: 'mg',     name: 'Machine Gun',  icon: '🔫', dmg: 9,   radius: 0.4, maxBreak: 1, range: 34,  cd: 0.08, kind: 'gun' },
+  { id: 'flame',  name: 'Flamethrower', icon: '🔥', dmg: 8,   radius: 1.4, maxBreak: 3, range: 7.5, cd: 0.1,  kind: 'stream', ignite: true },
   { id: 'rpg',    name: 'Shoulder RPG', icon: '🚀', dmg: 150, radius: 5.2, maxBreak: 6, range: 70,  cd: 1.8, kind: 'rocket', ignite: true }
 ];
 
@@ -126,6 +127,18 @@ export function buildWeaponModels() {
     h.add(shaft, head, cap);
   }
   out.hammer = h;
+
+  const mg = new THREE.Group();
+  {
+    const body = new THREE.Mesh(BR, dark); body.scale.set(0.16, 0.16, 0.72); body.position.set(0, 0.02, 0.05);
+    const barrel = new THREE.Mesh(CY, steel); barrel.scale.set(0.045, 0.7, 0.045); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, 0.7);
+    const mag = new THREE.Mesh(BR, dark); mag.scale.set(0.1, 0.28, 0.14); mag.position.set(0, -0.16, 0.02);
+    const stock = new THREE.Mesh(BR, wood); stock.scale.set(0.1, 0.12, 0.38); stock.position.set(0, 0.0, -0.42);
+    const grip = new THREE.Mesh(BR, wood); grip.scale.set(0.08, 0.2, 0.08); grip.position.set(0, -0.1, -0.16); grip.rotation.x = 0.4;
+    mg.add(body, barrel, mag, stock, grip);
+  }
+  mg.rotation.y = Math.PI;
+  out.mg = mg;
 
   const f = new THREE.Group();
   {

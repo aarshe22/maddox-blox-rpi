@@ -3,6 +3,21 @@
    cars cruise recorded road segments; boats patrol the river channel. */
 import * as THREE from 'three';
 import { BR, SP, CY, mkMat, clamp } from './brickkit.js';
+import { rayAabb } from './weaponry.js';
+
+/* People and animals can be killed. Vehicles and balloons are not.
+   h/r/w/d are the unscaled mesh size; _spawn scales people to the player
+   and animals to half that height. */
+const PLAYER_H = 2.13;
+const ANIMAL_H = PLAYER_H * 0.5;
+const VITALS = {
+  person: { hp: 28, h: 0.735, r: 0.34, w: 0.7, d: 0.45 },
+  cow: { hp: 46, h: 0.86, r: 0.5, w: 1.15, d: 0.75 },
+  dog: { hp: 20, h: 0.55, r: 0.28, w: 0.75, d: 0.42 },
+  cat: { hp: 14, h: 0.43, r: 0.2, w: 0.55, d: 0.36 },
+  chicken: { hp: 12, h: 0.47, r: 0.18, w: 0.5, d: 0.34 },
+  bird: { hp: 10, h: 0.145, r: 0.16, w: 0.4, d: 0.3 }
+};
 
 const SKINS = [0xffcc99, 0xf5b98b, 0xd69c6d, 0xa5714b, 0x8a5a3b];
 const SHIRTS = [0xdc1414, 0x2f7de1, 0xf5aa0f, 0x2aa876, 0x8e44ad, 0x16a3b8, 0xd81e5b];
@@ -265,6 +280,8 @@ export class Life {
     x = clamp(x, -H, H); z = clamp(z, -H, H);
     const gy = this.ground(x, z);
     const mesh = MAKERS[kind](this.rand, opts || {});
+    const vital = VITALS[kind];
+    if (vital) mesh.scale.setScalar((kind === 'person' ? PLAYER_H : ANIMAL_H) / vital.h);
     this.group.add(mesh);
     mesh.position.set(x, kind === 'boat' ? 0.4 : kind === 'bird' ? 5 : kind === 'balloon' ? 15 : gy, z);
     const c = {
@@ -273,6 +290,7 @@ export class Life {
       yaw: this.rand() * Math.PI * 2, lane: this.rand() < 0.5 ? -1 : 1,
       alive: true
     };
+    if (vital) c.hp = vital.hp;
     this.creatures.push(c);
     return c;
   }
@@ -364,12 +382,118 @@ export class Life {
     for (const c of this.creatures) {
       if (!c.alive) continue;
       if (Math.hypot(c.mesh.position.x - x, c.mesh.position.z - z) < r) {
-        c.alive = false;
-        c.mesh.visible = false;
+        if (c.hp != null) this.kill(c);
+        else { c.alive = false; c.mesh.visible = false; }
         n++;
       }
     }
     return n;
+  }
+
+  /* Weapon hits. Returns true when the creature was struck. */
+  hurt(c, amount) {
+    if (!c || !c.alive || c.hp == null) return false;
+    c.hp -= amount;
+    if (c.hp <= 0) this.kill(c);
+    return true;
+  }
+
+  kill(c) {
+    if (!c || !c.alive) return;
+    c.alive = false;
+    c.hp = 0;
+    c.mesh.visible = false;
+    if (VITALS[c.kind]) this.markPuddle(c);
+  }
+
+  /* Creatures standing in a forward arc (melee and flamethrower). */
+  inFront(px, pz, fwd, range, arc) {
+    const out = [];
+    for (const c of this.creatures) {
+      if (!c.alive || c.hp == null) continue;
+      const dx = c.mesh.position.x - px;
+      const dz = c.mesh.position.z - pz;
+      const dist = Math.hypot(dx, dz);
+      if (dist > range || dist < 0.25) continue;
+      const cos = (dx / dist) * fwd.x + (dz / dist) * fwd.z;
+      if (Math.acos(clamp(cos, -1, 1)) > arc / 2) continue;
+      out.push(c);
+    }
+    return out;
+  }
+
+  /* Closest living body along a shot. */
+  rayHit(ro, rd, maxDist) {
+    let best = null;
+    let bestT = maxDist;
+    for (const c of this.creatures) {
+      if (!c.alive || c.hp == null) continue;
+      const v = VITALS[c.kind];
+      const s = c.mesh.scale.y || 1;
+      const p = c.mesh.position;
+      const box = new THREE.Box3(
+        new THREE.Vector3(p.x - v.r * s, p.y, p.z - v.r * s),
+        new THREE.Vector3(p.x + v.r * s, p.y + v.h * s, p.z + v.r * s)
+      );
+      const t = rayAabb(ro, rd, box);
+      if (t !== null && t < bestT) { bestT = t; best = c; }
+    }
+    return best ? { c: best, t: bestT } : null;
+  }
+
+  ensurePuddle() {
+    if (this.puddle) return this.puddle;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    const mat = mkMat(0xc41616);
+    mat.polygonOffset = true;
+    mat.polygonOffsetFactor = -3;
+    mat.polygonOffsetUnits = -3;
+    const mesh = new THREE.InstancedMesh(geo, mat, 32);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    this.group.add(mesh);
+    this.puddle = mesh;
+    this._puddleM = new THREE.Matrix4();
+    this._puddleV = new THREE.Vector3();
+    this._puddleQ = new THREE.Quaternion();
+    this._puddleS = new THREE.Vector3();
+    return mesh;
+  }
+
+  markPuddle(c) {
+    let mesh = this.ensurePuddle();
+    if (mesh.count >= mesh.instanceMatrix.count) {
+      const bigger = new THREE.InstancedMesh(mesh.geometry, mesh.material, mesh.instanceMatrix.count * 2);
+      bigger.count = mesh.count;
+      bigger.frustumCulled = false;
+      bigger.castShadow = false;
+      bigger.receiveShadow = false;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, this._puddleM);
+        bigger.setMatrixAt(i, this._puddleM);
+      }
+      this.group.remove(mesh);
+      this.group.add(bigger);
+      this.puddle = bigger;
+      mesh = bigger;
+    }
+    const v = VITALS[c.kind];
+    const s = c.mesh.scale.y || 1;
+    const x = c.mesh.position.x;
+    const z = c.mesh.position.z;
+    const y = this.ground(x, z) + 0.05;
+    this._puddleQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI);
+    this._puddleM.compose(
+      this._puddleV.set(x, y, z),
+      this._puddleQ,
+      this._puddleS.set(v.w * s, 1, v.d * s)
+    );
+    mesh.setMatrixAt(mesh.count, this._puddleM);
+    mesh.count += 1;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   update(dt) {

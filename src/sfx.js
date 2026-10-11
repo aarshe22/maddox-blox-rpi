@@ -55,6 +55,7 @@ class Sfx {
   sword()    { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.16, 0.5, 3800, 600, 'bandpass', 2); } }
   hammer()   { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.14, 0.6, 'square', 320, 70); this._noise(t, 0.2, 0.7, 1500, 200); } }
   fireTick() { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.09, 0.12, 900, 300); } }
+  gun()      { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.05, 0.28, 3200, 900, 'highpass'); this._tone(t, 0.04, 0.16, 'square', 180, 70); } }
   launch()   { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.45, 0.5, 500, 2600, 'bandpass', 1.5); this._tone(t, 0.4, 0.3, 'sawtooth', 180, 60); } }
   explode()  { if (this.ensure()) { const t = this.ac.currentTime;
     this._noise(t, 0.85, 1.0, 2200, 60); this._tone(t, 0.5, 0.9, 'sine', 120, 30); this._noise(t, 0.25, 0.5, 5000, 800, 'highpass'); } }
