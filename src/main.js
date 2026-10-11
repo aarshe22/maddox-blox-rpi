@@ -3816,7 +3816,7 @@ class Game {
     this._padIndex = gp.index;
     this._padPrev = [];
     const name = String(gp.id || 'Controller').split('(')[0].trim();
-    this.toast(name + ' — stick move, A jump, Y mode, RT use', 'good');
+    this.toast(name + ' — stick move, L/R zoom, A jump, Y mode, RT use', 'good');
   }
 
   pollGamepad(dt) {
@@ -3888,8 +3888,8 @@ class Game {
     };
     if (selectMode && repeat('_padDpadT', b[14])) this.nudgeStrip(-1);
     if (selectMode && repeat('_padDpadT', b[15])) this.nudgeStrip(1);
-    if (repeat('_padLbT', b[4])) this.padShoulder(-1);
-    if (repeat('_padRbT', b[5])) this.padShoulder(1);
+    if (b[4].down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
+    if (b[5].down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
 
     if (b[0].edge) this.jumpQueued = 0.16;
     if (b[1].edge) this.setMode('explore');
@@ -3900,17 +3900,6 @@ class Game {
     }
     this.padFire = this.mode === 'weapon' && b[7].down;
     if (b[7].edge && this.mode !== 'weapon') this.padUse();
-  }
-
-  padShoulder(dir) {
-    if (this.mode === 'weapon' || this.mode === 'weather') { this.nudgeStrip(dir); return; }
-    if (this.mode === 'build') {
-      const n = BRICKS.length + 1;
-      this.selectSlot((this.slot + dir + n) % n);
-      return;
-    }
-    const order = MODES.map((m) => m.id);
-    this.setMode(order[(order.indexOf(this.mode) + dir + order.length) % order.length]);
   }
 
   padUse() {
