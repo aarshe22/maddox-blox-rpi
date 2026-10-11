@@ -29,6 +29,17 @@ export const SIZES = [
 ];
 const MAX_HALF = 160; // hard cap: runaway-memory guard for map size
 
+/* Drawing size of the canvas. Low is the default so a Pi stays responsive. */
+export const RESOLUTIONS = [
+  { id: 'low', label: 'Low', detail: '360p', w: 640, h: 360 },
+  { id: 'medium', label: 'Medium', detail: '720p', w: 1280, h: 720 },
+  { id: 'high', label: 'High', detail: '1080p', w: 1920, h: 1080 }
+];
+
+export function resolutionSize(id) {
+  return RESOLUTIONS.find((r) => r.id === id) || RESOLUTIONS[0];
+}
+
 const LS_KEY = 'maddox-blox-options-pi2';
 
 export function sizeHalf(id) {
@@ -49,6 +60,7 @@ export function defaultOptions() {
     enabled,
     sound: true,
     debug: false,
+    resolution: 'low',
     life: { animals: true, birds: false, balloons: false },
     lifeRev: 2
   };
@@ -62,6 +74,7 @@ export function loadOptions() {
     if (SIZES.some((s) => s.id === raw.size)) o.size = raw.size;
     if (typeof raw.sound === 'boolean') o.sound = raw.sound;
     if (typeof raw.debug === 'boolean') o.debug = raw.debug;
+    if (RESOLUTIONS.some((r) => r.id === raw.resolution)) o.resolution = raw.resolution;
     const keepLife = raw.lifeRev === 2;
     if (raw.life && typeof raw.life === 'object') {
       for (const k of ['animals', 'birds', 'balloons']) {
@@ -90,8 +103,10 @@ export function buildOptionsPanel(opts, hooks = {}) {
   el.innerHTML = `
     <div class="o-card">
       <div class="o-head"><b>World options</b><button class="o-x" title="Close">✕</button></div>
+      <label class="o-sec">Resolution</label>
+      <div class="o-seg o-res">${RESOLUTIONS.map((r) => `<button data-res="${r.id}">${r.label}<br>${r.detail}</button>`).join('')}</div>
       <label class="o-sec">Map size</label>
-      <div class="o-seg">${SIZES.map((s) => `<button data-size="${s.id}">${s.label}</button>`).join('')}</div>
+      <div class="o-seg o-size">${SIZES.map((s) => `<button data-size="${s.id}">${s.label}</button>`).join('')}</div>
       <label class="o-sec">Objects — count &amp; on/off</label>
       <div class="o-rows"></div>
       <label class="o-sec">Birds</label>
@@ -107,7 +122,7 @@ export function buildOptionsPanel(opts, hooks = {}) {
         <button class="o-toggle o-dbg" title="Logs player physics frames to find fall-through bugs"></button>
         <button class="o-copy" title="Copy all captured debug rows to the clipboard">📋 Copy debug log</button>
       </div>
-      <div class="o-note">Changes apply when you regenerate the world.</div>
+      <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate.</div>
       <div class="o-actions"><button class="o-regen">♻️ Regenerate world</button></div>
     </div>`;
 
@@ -146,9 +161,19 @@ export function buildOptionsPanel(opts, hooks = {}) {
     sync();
   }
 
-  const segs = [...el.querySelectorAll('.o-seg button')];
+  const segs = [...el.querySelectorAll('.o-size button')];
   const syncSegs = () => segs.forEach((b) => b.classList.toggle('active', b.dataset.size === opts.size));
   for (const b of segs) b.addEventListener('click', () => { opts.size = b.dataset.size; syncSegs(); });
+
+  const resBtns = [...el.querySelectorAll('.o-res button')];
+  const syncRes = () => resBtns.forEach((b) => b.classList.toggle('active', b.dataset.res === (opts.resolution || 'low')));
+  for (const b of resBtns) b.addEventListener('click', () => {
+    opts.resolution = b.dataset.res;
+    syncRes();
+    saveOptions(opts);
+    if (hooks.onResolution) hooks.onResolution(opts.resolution);
+  });
+  syncRes();
 
   /* Sound/voice + fall-debug toggles take effect immediately (no regen), and
      persist with the rest of the options. */
@@ -213,7 +238,7 @@ export function buildOptionsPanel(opts, hooks = {}) {
       saveOptions(opts);
     },
     toggle() { if (api.isOpen) api.close(); else api.open(); },
-    refresh() { syncSegs(); for (const s of syncers) s(); syncBirds(); syncSound(); syncDebug(); },
+    refresh() { syncSegs(); syncRes(); for (const s of syncers) s(); syncBirds(); syncSound(); syncDebug(); },
     syncDebug() { syncDebug(); }
   };
 

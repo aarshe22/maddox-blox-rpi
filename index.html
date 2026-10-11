@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
@@ -10,7 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
-<link rel="stylesheet" href="src/styles.css?v=4" />
+<link rel="stylesheet" href="src/styles.css?v=6" />
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -27,6 +30,26 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
 }
 #btn-weapon { bottom: 194px; background: rgba(220, 38, 38, .92); }
 #btn-weather { bottom: 292px; background: rgba(14, 116, 144, .94); }
+#goal-close, #goal-mark {
+  pointer-events: auto; cursor: pointer; font-family: "Trebuchet MS", sans-serif; font-weight: 800;
+  -webkit-appearance: none; appearance: none;
+}
+#goal-close {
+  position: absolute; top: 4px; right: 6px; border: 0; background: transparent;
+  color: #5c6b82; font-size: 12px; line-height: 1; padding: 2px 4px;
+}
+#goal-mark {
+  display: none; width: 44px; height: 44px; border-radius: 50%;
+  border: 2px solid rgba(28, 36, 51, 0.16); background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 6px 18px rgba(20, 30, 60, 0.18); color: #1c2433; font-size: 22px; line-height: 1; padding: 0;
+}
+#panel-goal:not(.collapsed) { padding-right: 42px; }
+#panel-goal.collapsed {
+  min-width: 0; width: auto; max-width: none; padding: 0; border: 0;
+  background: transparent; box-shadow: none; backdrop-filter: none;
+}
+#panel-goal.collapsed .goal-body, #panel-goal.collapsed #goal-close { display: none; }
+#panel-goal.collapsed #goal-mark { display: grid; place-items: center; }
 </style>
 </head>
 <body>
@@ -34,15 +57,39 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
 
 <div id="hud">
   <div class="panel" id="panel-goal">
-    <div class="title">Maddox Blox</div>
-    <div class="row"><span class="brick-dot"></span><b id="hud-count">0</b>&nbsp;bricks collected</div>
-    <div class="row" id="hud-need">Collect 30 more to fix the rainbow bridge</div>
+    <button id="goal-close" type="button" aria-label="Hide brick count">(X)</button>
+    <div class="goal-body">
+      <div class="title">Maddox Blox</div>
+      <div class="row"><span class="brick-dot"></span><b id="hud-count">0</b>&nbsp;bricks collected</div>
+      <div class="row" id="hud-need">Collect 30 more to fix the rainbow bridge</div>
+    </div>
+    <button id="goal-mark" type="button" aria-label="Show brick count">?</button>
   </div>
 
   <div id="hotbar"></div>
   <div id="stripbar" class="hidden"></div>
   <button id="btn-weapon" type="button" aria-label="Weapons">⚔️<br>Weapons</button>
   <button id="btn-weather" type="button" aria-label="Weather">🌦️<br>Weather</button>
+
+  <script>
+  (function () {
+    var panel = document.getElementById('panel-goal');
+    var closeBtn = document.getElementById('goal-close');
+    var mark = document.getElementById('goal-mark');
+    if (!panel || !closeBtn || !mark) return;
+    function setCollapsed(on) {
+      panel.classList.toggle('collapsed', on);
+    }
+    closeBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setCollapsed(true);
+    });
+    mark.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setCollapsed(false);
+    });
+  })();
+  </script>
 
   <div class="panel" id="panel-hint">
     <div id="hint-desktop">WASD move · drag look · Space jump · E doors · Esc explore · B build · V weapon · C weather · ⚙️ options</div>
@@ -88,7 +135,7 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
     document.head.appendChild(map);
     var app = document.createElement('script');
     app.type = 'module';
-    app.src = 'src/main.js?v=4';
+    app.src = 'src/main.js?v=6';
     document.body.appendChild(app);
   }
   (async function () {

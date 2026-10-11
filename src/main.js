@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset } from './options.js';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize } from './options.js';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
 import { sfx } from './sfx.js';
@@ -2740,7 +2740,8 @@ class Game {
       onOpen: () => { this.keys.clear(); this.pointers.clear(); },
       onRegen: () => this.regenerateWorld(),
       onSound: (v) => { sfx.setMuted(!v); voice.setEnabled(v); },
-      onDebug: (v) => DBG.set(v)
+      onDebug: (v) => DBG.set(v),
+      onResolution: () => this.resize()
     });
     DBG.onChange = (on) => { this.world.opts.debug = on; this.panel.syncDebug(); saveOptions(this.world.opts); };
     sfx.setMuted(!this.world.opts.sound);
@@ -5334,7 +5335,8 @@ class Game {
   }
 
   resize() {
-    const w = 512, h = 288;
+    const res = resolutionSize(this.world.opts && this.world.opts.resolution);
+    const w = res.w, h = res.h;
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(w, h, false);
     this.canvas.style.width = '100%';
