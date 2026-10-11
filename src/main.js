@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, loadOptions, saveOptions, sizePreset } from './options.js';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset } from './options.js';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
 import { sfx } from './sfx.js';
@@ -309,6 +309,7 @@ class World {
   }
 
   rebuild() {
+    this.scorch = null;
     this.teardown(this.over);
     this.disposeInteriors();
     this.clearBricks();
@@ -2681,14 +2682,13 @@ class Game {
 
     this.bindDom();
     this.bindStrips();
-    this.setMode('build');
     this.selectSlot(0);
     this.spawnCollectibles();
     this.bindInput();
     this.resize();
     this.updateHud();
-
     this.applyOutdoorFog();
+    this.start();
     this.tick = this.tick.bind(this);
     this.renderer.setAnimationLoop(this.tick);
   }
@@ -2858,18 +2858,8 @@ class Game {
     this.modePill.id = 'mode-pill';
     hud.appendChild(this.modePill);
 
-    this.modeBar = document.createElement('div');
-    this.modeBar.id = 'modebar';
-    hud.appendChild(this.modeBar);
-    this.modeSlots = MODES.map((m) => {
-      const el = document.createElement('button');
-      el.className = 'slot mode';
-      el.title = m.name;
-      el.innerHTML = `<span class="key">${m.key}</span><span class="wicon">${m.icon}</span>`;
-      el.addEventListener('click', (e) => { e.preventDefault(); this.setMode(m.id); });
-      this.modeBar.appendChild(el);
-      return el;
-    });
+    this.modeBar = null;
+    this.modeSlots = [];
 
     this.weaponSlots = WEAPONS.map((w, i) => {
       const el = document.createElement('button');
@@ -2880,19 +2870,7 @@ class Game {
       this.stripBar.appendChild(el);
       return el;
     });
-    this.exploreClear = document.createElement('button');
-    this.exploreClear.className = 'slot weather-w';
-    this.exploreClear.title = 'Clear skies · back to explore (Esc)';
-    this.exploreClear.innerHTML = `<span class="wicon">${stripPicture('explore')}</span>`;
-    this.exploreClear.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (this.weather !== 'clear') this.activateWeather('clear');
-      else this.setMode('explore');
-    });
-    this.stripBar.appendChild(this.exploreClear);
 
-    // weather strip splits into Sky/Time group and Disasters group with a
-    // divider; each button carries an emoji + a text label
     this.weatherSlots = WEATHERS.map((w) => {
       const el = document.createElement('button');
       el.className = 'slot weather-w';
@@ -2902,43 +2880,41 @@ class Game {
       this.stripBar.appendChild(el);
       return el;
     });
-    this.stripDivider = document.createElement('div');
-    this.stripDivider.className = 'strip-div';
-    this.stripDivider.textContent = '⚠️';
-    this.stripDivider.title = 'Disasters';
-    this.stripBar.insertBefore(this.stripDivider, this.weatherSlots[DISASTER_FROM]);
   }
 
-  /* One row at a time; only wrap to a second row once the bar would exceed
-     90% of the viewport width (per UAT layout rule). */
+  /* Build hotbar may wrap. Weapon and weather strips stay one full-width row. */
   layoutStrips() {
     const max = window.innerWidth * 0.9;
-    for (const bar of [this.hotbar, this.stripBar, this.modeBar]) {
-      if (!bar) continue;
-      bar.classList.remove('wrap2');
-      bar.style.maxWidth = '';
-      if (bar.scrollWidth > max) bar.classList.add('wrap2');
+    if (this.hotbar) {
+      this.hotbar.classList.remove('wrap2');
+      this.hotbar.style.maxWidth = '';
+      if (this.hotbar.scrollWidth > max) this.hotbar.classList.add('wrap2');
+    }
+    if (this.stripBar) {
+      this.stripBar.classList.remove('wrap2');
+      this.stripBar.style.maxWidth = 'none';
+      this.stripBar.style.width = '100%';
     }
   }
 
   setMode(mode) {
     if (mode === this.mode) { this.refreshStrips(); return; }
-    const prev = this.mode;
     if (mode === 'weather') {
       this.mode = 'weather';
+      const wi = WEATHERS.findIndex((w) => w.id === this.weather);
+      this.stripFocus = wi < 0 ? 0 : wi;
       sfx.swap();
-      this.toast('Weather — left and right arrows pick an icon', 'good');
+      this.toast('Weather — stick moves, A activates, Y closes', 'good');
       this.refreshStrips();
       return;
     }
     this.mode = mode;
     if (mode !== 'weapon') sfx.setFlame(false);
-    // explore/build are neutral: leaving weather mode pacifies the sky again
-    if (prev === 'weather' && (mode === 'explore' || mode === 'build') && this.weather !== 'clear') {
-      this.activateWeather('clear');
-    }
     sfx.swap();
-    if (mode === 'weapon') this.toast('Weapon — left and right arrows pick an icon', 'good');
+    if (mode === 'weapon') {
+      this.stripFocus = this.weapon;
+      this.toast('Weapons — stick moves, A activates, X closes', 'good');
+    }
     else if (mode === 'explore') this.toast('Explore mode — roam free. Pick a mode anytime.', 'good');
     this.refreshStrips();
   }
@@ -2966,18 +2942,19 @@ class Game {
     const weather = this.mode === 'weather';
     this.hotbar.classList.toggle('hidden', !build);
     this.stripBar.classList.toggle('hidden', !weapon && !weather);
-    if (this.exploreClear) this.exploreClear.style.display = weather ? '' : 'none';
-    if (this.stripDivider) this.stripDivider.style.display = weather ? 'flex' : 'none';
     this.stripBar.classList.toggle('labeled', weather);
     this.layoutStrips();
+    const weaponFocus = weapon ? (this.stripFocus ?? this.weapon) : this.weapon;
     this.weaponSlots.forEach((el, i) => {
       el.style.display = weapon ? '' : 'none';
-      el.classList.toggle('active', weapon && i === this.weapon);
+      el.classList.toggle('active', weapon && i === weaponFocus);
     });
+    const weatherFocus = weather
+      ? (this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather)))
+      : -1;
     this.weatherSlots.forEach((el, i) => {
-      const id = WEATHERS[i].id;
       el.style.display = weather ? '' : 'none';
-      el.classList.toggle('active', weather && id === this.weather && !(id === 'nuke' && !this.nuke));
+      el.classList.toggle('active', weather && i === weatherFocus);
     });
     this.modeSlots.forEach((el, i) => el.classList.toggle('active', MODES[i].id === this.mode));
     this.weaponRig.visible = weapon;
@@ -2992,9 +2969,36 @@ class Game {
 
   selectWeapon(i) {
     this.weapon = clamp(i, 0, WEAPONS.length - 1);
+    this.stripFocus = this.weapon;
     this.showWeaponModel();
     this.refreshStrips();
     voice.speak(WEAPONS[this.weapon].name);
+  }
+
+  /* Gamepad: move the highlight only. A commits it, the same as a tap. */
+  moveStripFocus(dir) {
+    if (this.mode === 'weapon') {
+      const n = WEAPONS.length;
+      const cur = this.stripFocus ?? this.weapon;
+      this.stripFocus = (cur + dir + n) % n;
+      this.refreshStrips();
+      return;
+    }
+    if (this.mode !== 'weather') return;
+    const n = WEATHERS.length;
+    const cur = this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather));
+    this.stripFocus = (cur + dir + n) % n;
+    this.refreshStrips();
+  }
+
+  confirmStrip() {
+    if (this.mode === 'weapon') {
+      this.selectWeapon(this.stripFocus ?? this.weapon);
+      return;
+    }
+    if (this.mode !== 'weather') return;
+    const i = this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather));
+    this.onWeatherClick(WEATHERS[i].id);
   }
 
   /* Left/right while a strip is open: step the highlighted icon. */
@@ -3022,6 +3026,8 @@ class Game {
     const def = WEATHERS.find((w) => w.id === id) || WEATHERS[0];
     voice.speak(def.name);
     this.weather = def.id;
+    const fi = WEATHERS.findIndex((w) => w.id === def.id);
+    if (fi >= 0) this.stripFocus = fi;
     this.weatherDef = def;
     this.weatherT = 0;
     this.weatherDmgT = 0;
@@ -3564,6 +3570,35 @@ class Game {
   /* ------------------------------------------------------------- input */
   bindStripsDone() {}
 
+  /* Both bumpers: throw away the current world and build a small one from defaults. */
+  resetSmallWorld() {
+    const fresh = defaultOptions();
+    fresh.size = 'small';
+    const opts = this.world.opts;
+    opts.size = fresh.size;
+    opts.counts = fresh.counts;
+    opts.enabled = fresh.enabled;
+    opts.life = fresh.life;
+    opts.sound = fresh.sound;
+    opts.debug = fresh.debug;
+    saveOptions(opts);
+    if (this.panel) this.panel.refresh();
+    sfx.setMuted(!opts.sound);
+    voice.setEnabled(opts.sound);
+    DBG.set(false);
+    this.weapon = 0;
+    this.stripFocus = 0;
+    if (this.weaponModels) this.showWeaponModel();
+    this.defuseNuke();
+    for (const list of [this.rockets, this.fireballs, this.meteors, this._falling]) {
+      if (!list) continue;
+      for (const o of list) if (o.mesh) this.scene.remove(o.mesh);
+      list.length = 0;
+    }
+    if (this.mode !== 'explore') this.setMode('explore');
+    this.regenerateWorld();
+  }
+
   regenerateWorld() {
     if (this.life) { this.life.dispose(); }
     if (this.train) { this.train.dispose(); this.train = null; }
@@ -3618,8 +3653,7 @@ class Game {
   start() {
     this.started = true;
     this.setMode('explore');
-    this.intro.classList.add('hidden');
-    this.toast('🧭 Explore mode — grab loose bricks, or switch modes (1-4).', 'good');
+    if (this.intro) this.intro.classList.add('hidden');
   }
 
   toast(msg, kind) {
@@ -3816,7 +3850,7 @@ class Game {
     this._padIndex = gp.index;
     this._padPrev = [];
     const name = String(gp.id || 'Controller').split('(')[0].trim();
-    this.toast(name + ' — stick move, L/R zoom, A jump, Y mode, RT use', 'good');
+    this.toast(name + ' — X weapons, Y weather, A select, L+R reset', 'good');
   }
 
   pollGamepad(dt) {
@@ -3858,19 +3892,20 @@ class Game {
       if (b[1].edge && this.panel.close) this.panel.close();
       return;
     }
-    if (!this.started && (b[0].edge || b[9].edge)) this.start();
-
     const selectMode = this.mode === 'weapon' || this.mode === 'weather';
     let lx = axis(gp.axes[0]);
     let ly = axis(gp.axes[1]);
     if (b[12].down) ly = -1;
     if (b[13].down) ly = 1;
-    if (!selectMode) {
+    if (selectMode) {
+      this.padVec.x = 0;
+      this.padVec.y = ly;
+    } else {
       if (b[14].down) lx = -1;
       if (b[15].down) lx = 1;
+      this.padVec.x = lx;
+      this.padVec.y = ly;
     }
-    this.padVec.x = lx;
-    this.padVec.y = ly;
 
     const rx = axis(gp.axes[2]);
     const ry = axis(gp.axes[3]);
@@ -3886,20 +3921,33 @@ class Game {
       this[slot] = now;
       return true;
     };
-    if (selectMode && repeat('_padDpadT', b[14])) this.nudgeStrip(-1);
-    if (selectMode && repeat('_padDpadT', b[15])) this.nudgeStrip(1);
-    if (b[4].down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
-    if (b[5].down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
-
-    if (b[0].edge) this.jumpQueued = 0.16;
-    if (b[1].edge) this.setMode('explore');
-    if (b[2].edge) this.toggleDoor();
-    if (b[3].edge) {
-      const order = MODES.map((m) => m.id);
-      this.setMode(order[(order.indexOf(this.mode) + 1) % order.length]);
+    const hold = (slot, on) => {
+      if (!on) { this[slot] = 0; return false; }
+      const now = performance.now();
+      if (this[slot] && now - this[slot] < 180) return false;
+      this[slot] = now;
+      return true;
+    };
+    if (selectMode && (repeat('_padDpadL', b[14]) || hold('_padStickL', lx < -0.35))) this.moveStripFocus(-1);
+    if (selectMode && (repeat('_padDpadR', b[15]) || hold('_padStickR', lx > 0.35))) this.moveStripFocus(1);
+    const bumpers = b[4].down && b[5].down;
+    if (bumpers && (b[4].edge || b[5].edge)) this.resetSmallWorld();
+    else if (!bumpers) {
+      if (b[4].down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
+      if (b[5].down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
     }
-    this.padFire = this.mode === 'weapon' && b[7].down;
-    if (b[7].edge && this.mode !== 'weapon') this.padUse();
+
+    if (this.mode === 'explore' && b[0].edge) {
+      if (this.doorAction) this.toggleDoor();
+      else this.jumpQueued = 0.16;
+    }
+    if (this.mode === 'weather' && b[0].edge) this.confirmStrip();
+    if (this.mode === 'weapon' && b[0].edge) this.selectWeapon(this.stripFocus ?? this.weapon);
+    if (b[1].edge && selectMode) this.setMode('explore');
+    if (b[2].edge) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon');
+    if (b[3].edge) this.setMode(this.mode === 'weather' ? 'explore' : 'weather');
+    this.padFire = this.mode === 'weapon' && b[0].down;
+    if (b[7].edge && this.mode === 'build') this.padUse();
   }
 
   padUse() {

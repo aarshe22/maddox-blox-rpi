@@ -99,21 +99,25 @@ body.touch #panel-hint { display: none; }
 }
 #stripbar {
   position: absolute;
-  left: 50%;
-  bottom: 84px;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: none;
+  transform: none;
+  box-sizing: border-box;
   display: flex;
-  gap: 6px;
-  padding: 7px;
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 8px;
   background: rgba(24, 30, 46, .5);
-  border: 2px solid rgba(255, 255, 255, .35);
-  border-radius: 16px;
+  border: none;
+  border-top: 2px solid rgba(255, 255, 255, .35);
+  border-radius: 0;
   backdrop-filter: blur(6px);
   pointer-events: auto;
   z-index: 4;
-  max-width: 96vw;
-  flex-wrap: wrap;
-  justify-content: center;
+  justify-content: stretch;
 }
 #stripbar.hidden { display: none; }
 #stripbar .slot .wicon { font-size: 20px; line-height: 24px; }
@@ -137,21 +141,7 @@ body.touch #panel-hint { display: none; }
 #mode-pill.weapon { background: rgba(220, 38, 38, .88); }
 #mode-pill.weather { background: rgba(14, 116, 144, .9); }
 #mode-pill.explore { background: rgba(22, 132, 84, .9); }
-#modebar {
-  position: absolute;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 6px;
-  padding: 6px;
-  background: var(--panel);
-  border: 2px solid var(--edge);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-  pointer-events: auto;
-  z-index: 5;
-}
+#modebar { display: none; }
 .slot.mode { width: 46px; height: 46px; }
 .slot.mode .wicon { font-size: 20px; line-height: 22px; }
 .slot.mode.active { outline: 3px solid #ffd23f; }
@@ -210,7 +200,8 @@ body.touch #panel-hint { display: none; }
 /* one row by default; wrap to two only when the bar would exceed 90% vw
    (layoutStrips() adds .wrap2 in that case) */
 #hotbar, #stripbar { flex-wrap: nowrap; }
-#hotbar.wrap2, #stripbar.wrap2 { flex-wrap: wrap; max-width: 90vw; }
+#hotbar.wrap2 { flex-wrap: wrap; max-width: 90vw; }
+#stripbar.wrap2 { flex-wrap: nowrap; max-width: none; width: 100%; }
 
 #toast {
   position: absolute;
@@ -437,11 +428,15 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
 }
 #welcome-banner:not([src]) { visibility: hidden; }
 
-/* Weapon and weather strips: large drawn icons, readable on a TV. */
-#stripbar .slot {
-  width: 108px;
-  height: 108px;
-  border-radius: 16px;
+/* Weapon and weather strips: one row, each icon sharing the full viewport width. */
+#stripbar .slot,
+#stripbar.labeled .weather-w {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: clamp(84px, 18vh, 140px);
+  border-radius: 12px;
+  padding: 4px 2px;
 }
 #stripbar .slot .wicon {
   display: flex;
@@ -453,19 +448,18 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
   line-height: 0;
 }
 #stripbar .picon {
-  width: 84px;
-  height: 84px;
+  width: min(76px, 78%);
+  height: auto;
+  max-height: 68%;
   display: block;
-}
-#stripbar.labeled .weather-w {
-  width: 120px;
-  height: 132px;
-  min-width: 120px;
 }
 #stripbar .wlabel,
 #stripbar.labeled .weather-w .wlabel {
   display: block;
-  font-size: 15px;
+  font-size: clamp(10px, 1.15vw, 15px);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #stripbar .slot .key {
   font-size: 14px;

@@ -36,7 +36,7 @@
 
 <div id="toast"></div>
 
-<div id="intro" onclick="if(event.target===this)document.getElementById('btn-play').click()">
+<div id="intro" class="hidden" onclick="if(event.target===this)document.getElementById('btn-play').click()">
   <div class="card">
     <img id="welcome-banner" alt="Maddox Blox welcome — 8-color brick mosaic portrait" />
     <h1>Maddox Blox</h1>
@@ -60,6 +60,8 @@
 /* A file:// page cannot load the module above. Say so on the title screen. */
 if (location.protocol === 'file:') {
   document.addEventListener('DOMContentLoaded', function () {
+    var intro = document.getElementById('intro');
+    if (intro) intro.classList.remove('hidden');
     var card = document.querySelector('#intro .card');
     if (!card) return;
     card.innerHTML = '<h1>Maddox Blox</h1>'
