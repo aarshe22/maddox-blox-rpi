@@ -134,16 +134,23 @@ try {
   var localAddons = './node_modules/three/examples/jsm/';
   var cdnThree = 'https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js';
   var cdnAddons = 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/';
+  var needsShim = !(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
+  if (needsShim) {
+    var shim = document.createElement('script');
+    shim.async = true;
+    shim.src = 'https://ga.jspm.io/npm:es-module-shims@2.8.4/dist/es-module-shims.js';
+    document.head.appendChild(shim);
+  }
   function installMap(three, addons) {
     var map = document.createElement('script');
-    map.type = 'importmap';
+    map.type = needsShim ? 'importmap-shim' : 'importmap';
     map.textContent = JSON.stringify({
       imports: { three: three, 'three/addons/': addons }
     });
     document.head.appendChild(map);
     var app = document.createElement('script');
-    app.type = 'module';
-    app.src = 'src/main.js?v=56';
+    app.type = needsShim ? 'module-shim' : 'module';
+    app.src = 'src/main.js?v=57';
     document.body.appendChild(app);
   }
   async function localThreeExists() {
