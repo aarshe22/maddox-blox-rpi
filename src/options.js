@@ -201,7 +201,10 @@ export function buildOptionsPanel(opts, hooks = {}) {
             <p class="o-pad-step" aria-live="polite"></p>
           </div>
           <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate.</div>
-          <div class="o-actions"><button class="o-regen">♻️ Regenerate world</button></div>
+          <div class="o-actions">
+            <button type="button" class="o-reset">Reset to defaults</button>
+            <button class="o-regen">♻️ Regenerate world</button>
+          </div>
         </div>
         <div>
           <label class="o-sec">Objects — count &amp; on/off</label>
@@ -398,6 +401,17 @@ export function buildOptionsPanel(opts, hooks = {}) {
       else askPad();
     }
   };
+
+  el.querySelector('.o-reset').addEventListener('click', () => {
+    const fresh = defaultOptions();
+    opts.size = fresh.size;
+    opts.resolution = fresh.resolution;
+    opts.counts = fresh.counts;
+    opts.enabled = fresh.enabled;
+    saveOptions(opts);
+    api.refresh();
+    if (hooks.onResolution) hooks.onResolution(opts.resolution);
+  });
 
   el.querySelector('.o-x').addEventListener('click', () => api.close());
   window.addEventListener('resize', () => { if (api.isOpen) fitCard(); });

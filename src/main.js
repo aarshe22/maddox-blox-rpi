@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=12';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=13';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
@@ -4825,7 +4825,7 @@ class Game {
     const corner = new THREE.Vector3();
     group.traverse((o) => {
       if (!o.isMesh || !o.geometry) return;
-      if (o.parent && o.parent.name === 'beard') return;
+      if (o.name === 'beard') return;
       if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
       const bb = o.geometry.boundingBox;
       for (const x of [bb.min.x, bb.max.x]) {
@@ -4844,7 +4844,7 @@ class Game {
     const hosts = [];
     const seen = new Set();
     const add = (obj) => {
-      if (!obj || seen.has(obj) || obj.userData.beard) return;
+      if (!obj || seen.has(obj)) return;
       seen.add(obj);
       hosts.push(obj);
     };
@@ -4866,45 +4866,38 @@ class Game {
     return hosts;
   }
 
-  attachBeard(host, mat) {
-    const box = this.localAabb(host);
-    if (box.isEmpty()) return null;
-    const h = box.max.y - box.min.y;
-    if (h < 0.02) return null;
-    const voxel = Math.max(0.035, h * 0.14);
-    const frontZ = box.min.z;
-    const backZ = box.max.z;
-    const mouthY = box.min.y + h * 0.64;
-    const cx = (box.min.x + box.max.x) * 0.5;
-    const g = new THREE.Group();
-    g.name = 'beard';
-    host.add(g);
-    host.userData.beard = g;
-    const stache = new THREE.Mesh(BR, mat);
-    stache.scale.set(voxel * 1.8, voxel * 0.32, voxel * 0.42);
-    stache.position.set(cx, mouthY, frontZ - voxel * 0.22);
-    const tee = new THREE.Mesh(BR, mat);
-    tee.scale.set(voxel * 0.55, voxel * 0.75, voxel * 0.4);
-    tee.position.set(cx, mouthY - voxel * 0.55, frontZ - voxel * 0.12);
-    g.add(stache, tee);
-    return { group: g, mat, voxel, frontZ, backZ, mouthY, feetY: box.min.y, cx, n: 0 };
-  }
-
-  /* One more brick. The first ones hang from the chin; the rest drag behind on the ground. */
-  growBeard(rec) {
-    const { voxel, mouthY, feetY, frontZ, backZ, cx, mat, group, n } = rec;
-    const mesh = new THREE.Mesh(BR, mat);
-    const s = voxel * 0.92;
-    mesh.scale.setScalar(s);
-    const drop = Math.max(2, Math.ceil((mouthY - feetY) / (voxel * 0.9)));
-    if (n < drop) {
-      mesh.position.set(cx, mouthY - voxel * 0.85 - n * voxel * 0.88, frontZ - voxel * 0.05 + n * voxel * 0.12);
-    } else {
-      const k = n - drop;
-      mesh.position.set(cx, feetY + s * 0.5, backZ + voxel * 0.15 + k * voxel * 0.95);
+  /* One beard shape on the inhabitant. Later stages only stretch that shape. */
+  poseHair(host, stage) {
+    let box = host.userData.hairBox;
+    if (!box) {
+      box = this.localAabb(host);
+      if (box.isEmpty()) return false;
+      host.userData.hairBox = box;
     }
-    group.add(mesh);
-    rec.n++;
+    const h = box.max.y - box.min.y;
+    if (h < 0.02) return false;
+    const voxel = Math.max(0.08, h * 0.22);
+    const mouthY = box.min.y + h * 0.64;
+    const frontZ = box.min.z;
+    const drop = Math.max(1, (mouthY - box.min.y) / voxel);
+    const hang = Math.min(stage, drop);
+    const trail = Math.max(0, stage - drop);
+    const height = voxel * (0.9 + hang);
+    const depth = voxel * (0.55 + trail);
+    let mesh = host.userData.hairMesh;
+    if (!mesh) {
+      if (host.userData.hairColor == null) host.userData.hairColor = this._hairN++ % this._hairMats.length;
+      mesh = new THREE.Mesh(BR, this._hairMats[host.userData.hairColor]);
+      mesh.name = 'beard';
+      mesh.castShadow = false;
+      host.add(mesh);
+      host.userData.hairMesh = mesh;
+    }
+    const cx = (box.min.x + box.max.x) * 0.5;
+    mesh.scale.set(voxel * 1.6, height, depth);
+    mesh.position.set(cx, mouthY - height * 0.45, frontZ + depth * 0.35);
+    host.userData.hairStage = stage;
+    return true;
   }
 
   unleashHair() {
@@ -4919,29 +4912,29 @@ class Game {
     }
     if (!this._hairMats) {
       this._hairMats = [0x2a1a10, 0x1a120c, 0x6b3a1e, 0xc4a574, 0x3a3a3a, 0x8b1e1e, 0xe6d3a3].map((hex) => mkMat(hex));
+      this._hairN = 0;
     }
-    const beards = [];
-    hosts.forEach((host, i) => {
-      const rec = this.attachBeard(host, this._hairMats[i % this._hairMats.length]);
-      if (rec) beards.push(rec);
-    });
-    if (!beards.length) {
+    let n = 0;
+    for (const host of hosts) if (this.poseHair(host, 1)) n++;
+    if (!n) {
       this.toast('Nobody here to grow a beard', 'bad');
       return;
     }
-    this.hair = { t: 0, beards };
+    this.hair = { t: 0 };
     sfx.chime();
-    this.toast(`Hair — ${beards.length} inhabitants sprouted a moustache and goatee. A new block grows every minute.`, 'good');
+    this.toast(`Hair — ${n} inhabitants sprouted a beard. It grows longer every 12 seconds.`, 'good');
   }
 
   tickHair(dt) {
     if (!this.hair) return;
     this.hair.t += dt;
     let guard = 0;
-    while (this.hair.t >= 60 && guard < 8) {
-      this.hair.t -= 60;
-      for (const b of this.hair.beards) this.growBeard(b);
+    while (this.hair.t >= 12 && guard < 8) {
+      this.hair.t -= 12;
       guard++;
+      for (const host of this.collectHairHosts()) {
+        this.poseHair(host, (host.userData.hairStage || 1) + 1);
+      }
     }
   }
 
