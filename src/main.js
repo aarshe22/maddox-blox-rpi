@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize } from './options.js?v=7';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=11';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
-import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
-import { sfx } from './sfx.js';
+import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js?v=12';
+import { sfx } from './sfx.js?v=12';
 import { voice } from './voice.js';
 import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js';
 import { Train } from './train.js';
@@ -107,6 +107,7 @@ const STRIP_PICS = {
   tsunami: stripPic('<path d="M4 40c8-14 16-14 24 0s16 14 28 0v16H4z" fill="#35a7ff" stroke="#243044" stroke-width="3"/><path d="M4 48c8-8 16-8 24 0s16 8 28 0" fill="none" stroke="#8fd0ff" stroke-width="3"/>'),
   meteor: stripPic('<path d="M8 20c10 2 16 8 18 18" stroke="#ff7a18" stroke-width="6" stroke-linecap="round"/><circle cx="40" cy="40" r="14" fill="#c94f06" stroke="#243044" stroke-width="3"/><circle cx="34" cy="34" r="4" fill="#ffd23f"/>'),
   nuke: stripPic('<circle cx="32" cy="32" r="22" fill="#ffe14a" stroke="#243044" stroke-width="3"/><circle cx="32" cy="32" r="6" fill="#243044"/><path d="M32 10a8 8 0 0 1 0 14M18 42a8 8 0 0 1 12-8M46 42a8 8 0 0 0-12-8" fill="#243044"/>'),
+  prop: stripPic('<circle cx="32" cy="42" r="13" fill="#ffcc66" stroke="#243044" stroke-width="3"/><path d="M16 40h32v5H16z" fill="#d23b2f" stroke="#243044" stroke-width="2"/><rect x="29" y="22" width="6" height="10" rx="1" fill="#22252b"/><path d="M8 20h48M32 8v24" stroke="#e8eef5" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="20" r="3.2" fill="#f4c430" stroke="#243044" stroke-width="2"/>'),
   explore: stripPic('<circle cx="32" cy="32" r="22" fill="#fff" stroke="#243044" stroke-width="3"/><path d="M32 14l6 16-16 6z" fill="#e23b2f"/><path d="M32 50l-6-16 16-6z" fill="#243044"/>')
 };
 export function stripPicture(id) {
@@ -2396,6 +2397,8 @@ class Player {
     this.coyote = 0;
     this.phase = 0;
     this.grounded = true;
+    this.flying = false;
+    this.liftT = 0;
 
     const skin = mkMat(0xffcc66);
     const shirt = mkMat(0xe8402a);
@@ -2423,13 +2426,17 @@ class Player {
       box(hair, 0.13, 0.045, 0.05, sx, 1.17, -0.29);
     }
     box(mkMat(0xc0392b), 0.22, 0.045, 0.05, 0, 0.88, -0.29);
-    box(mkMat(0x2f7de1), 0.66, 0.14, 0.6, 0, 1.34, 0);
-    box(mkMat(0x2f7de1), 0.5, 0.07, 0.26, 0, 1.31, -0.4);
+    const cap = box(mkMat(0x2f7de1), 0.66, 0.14, 0.6, 0, 1.34, 0);
+    const brim = box(mkMat(0x2f7de1), 0.5, 0.07, 0.26, 0, 1.31, -0.4);
     const stud = new THREE.Mesh(CY, mkMat(0xffd23f));
     stud.scale.set(0.12, 0.1, 0.12);
     stud.position.y = 1.45;
     stud.castShadow = false;
     hip.add(stud);
+    this.hatParts = [cap, brim, stud];
+    this.propHat = this.makePropHat();
+    this.propHat.visible = false;
+    hip.add(this.propHat);
 
     this.arms = [];
     this.legs = [];
@@ -2449,6 +2456,46 @@ class Player {
       this.legs.push(leg);
     }
     this.root = g;
+  }
+
+  makePropHat() {
+    const g = new THREE.Group();
+    g.position.y = 1.36;
+    const red = mkMat(0xd23b2f);
+    const cap = new THREE.Mesh(BR, red);
+    cap.scale.set(0.7, 0.16, 0.64);
+    cap.castShadow = false;
+    const brim = new THREE.Mesh(BR, red);
+    brim.scale.set(0.46, 0.05, 0.2);
+    brim.position.set(0, -0.02, -0.4);
+    brim.castShadow = false;
+    const mast = new THREE.Mesh(CY, mkMat(0x22252b));
+    mast.scale.set(0.055, 0.2, 0.055);
+    mast.position.y = 0.16;
+    mast.castShadow = false;
+    const hub = new THREE.Mesh(CY, mkMat(0xf4c430));
+    hub.scale.set(0.09, 0.07, 0.09);
+    hub.position.y = 0.28;
+    hub.castShadow = false;
+    const blades = new THREE.Group();
+    blades.position.y = 0.33;
+    const bladeMat = mkMat(0xe7eef6);
+    for (let i = 0; i < 3; i++) {
+      const blade = new THREE.Mesh(BR, bladeMat);
+      blade.scale.set(0.58, 0.03, 0.09);
+      blade.position.x = 0.26;
+      blade.rotation.y = (i * Math.PI * 2) / 3;
+      blade.castShadow = false;
+      blades.add(blade);
+    }
+    g.add(cap, brim, mast, hub, blades);
+    this.propBlades = blades;
+    return g;
+  }
+
+  setPropeller(on) {
+    if (this.hatParts) for (const part of this.hatParts) part.visible = !on;
+    if (this.propHat) this.propHat.visible = !!on;
   }
 
   groundTopAt(x, z, feet) {
@@ -2482,6 +2529,15 @@ class Player {
   }
 
   update(dt, move, jump) {
+    if (this.flying && this.world.floodY == null) {
+      this.fly(dt, move, jump);
+      return;
+    }
+    if (this.flying) {
+      this.flying = false;
+      this.setPropeller(false);
+      sfx.setRotor(false);
+    }
     if (this.world.floodY != null) {
       this.swim(dt, move);
       return;
@@ -2573,6 +2629,56 @@ class Player {
     this.root.rotation.y = this.yaw;
   }
 
+  /* Hover above the ground, steer with the usual move vector, and creep forward. */
+  fly(dt, move, jump) {
+    const yaw = this.lookYaw != null ? this.lookYaw : this.yaw;
+    const cruise = 1.7;
+    const speed = 5.4;
+    const wishX = move.x * speed + (-Math.sin(yaw) * cruise);
+    const wishZ = move.z * speed + (-Math.cos(yaw) * cruise);
+    this.vel.x += (wishX - this.vel.x) * Math.min(1, dt * 4);
+    this.vel.z += (wishZ - this.vel.z) * Math.min(1, dt * 4);
+    this.vel.y = 0;
+    if (jump) this.liftT = 0.55;
+    this.liftT = Math.max(0, this.liftT - dt);
+
+    const surf = this.world.surfaceTopAny(this.pos.x, this.pos.z);
+    const near = this.groundTopAt(this.pos.x, this.pos.z, this.pos.y);
+    const floor = Math.max(isFinite(surf) ? surf : 0, near > -Infinity ? near : 0);
+    const target = floor + 6.6 + (this.liftT > 0 ? 2.6 : 0);
+    const nextY = this.pos.y + (target - this.pos.y) * Math.min(1, dt * 1.35);
+    const feet = Math.min(this.pos.y, nextY);
+    const head = Math.max(this.pos.y, nextY) + this.height;
+    if (!this.blocked(this.pos.x, this.pos.z, feet, head, 0)) this.pos.y = nextY;
+
+    const nx = this.pos.x + this.vel.x * dt;
+    const nz = this.pos.z + this.vel.z * dt;
+    const flyFeet = this.pos.y;
+    const flyHead = flyFeet + this.height;
+    if (!this.blocked(nx, this.pos.z, flyFeet, flyHead, 0)) this.pos.x = nx; else this.vel.x *= 0.2;
+    if (!this.blocked(this.pos.x, nz, flyFeet, flyHead, 0)) this.pos.z = nz; else this.vel.z *= 0.2;
+    const H = this.world.half;
+    this.pos.x = clamp(this.pos.x, -H + 0.5, H - 0.5);
+    this.pos.z = clamp(this.pos.z, -H + 0.5, H - 0.5);
+    this.grounded = false;
+
+    if (this.propBlades) this.propBlades.rotation.y += dt * 26;
+    this.phase += dt * 6;
+    const bob = Math.sin(this.phase) * 0.06;
+    this.legs[0].rotation.x = 0.4;
+    this.legs[1].rotation.x = 0.25;
+    this.arms[0].rotation.x = -0.35;
+    this.arms[1].rotation.x = -0.35;
+    this.root.position.set(this.pos.x, this.pos.y + bob, this.pos.z);
+    const face = Math.atan2(-wishX, -wishZ);
+    let d = face - this.yaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    this.yaw += d * Math.min(1, dt * 6);
+    this.root.rotation.x = 0.12;
+    this.root.rotation.y = this.yaw;
+  }
+
   /* Stay on the rising water. Chest at the surface, arms paddling. */
   swim(dt, move) {
     const speed = 3.6;
@@ -2617,7 +2723,8 @@ class Player {
 class Game {
   constructor() {
     this.canvas = document.getElementById('scene');
-    // Pi 4 draws at 896x504 (16:9). The canvas CSS stretches that buffer to the TV.
+    // Drawing size comes from the resolution option. Low (640x360) is the default
+    // so a Pi 4 stays responsive; CSS stretches that buffer to the screen.
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(1);
     this.renderer.shadowMap.enabled = false;
@@ -2741,7 +2848,8 @@ class Game {
       onRegen: () => this.regenerateWorld(),
       onSound: (v) => { sfx.setMuted(!v); voice.setEnabled(v); },
       onDebug: (v) => DBG.set(v),
-      onResolution: () => this.resize()
+      onResolution: () => this.resize(),
+      onPad: (map) => { this.padMap = map; }
     });
     DBG.onChange = (on) => { this.world.opts.debug = on; this.panel.syncDebug(); saveOptions(this.world.opts); };
     sfx.setMuted(!this.world.opts.sound);
@@ -2955,6 +3063,16 @@ class Game {
       return el;
     });
 
+    this.weatherExit = document.createElement('button');
+    this.weatherExit.className = 'slot weather-w';
+    this.weatherExit.title = 'Close weather';
+    this.weatherExit.innerHTML = `<span class="wicon">${stripPicture('none')}</span><span class="wlabel">Exit</span>`;
+    this.weatherExit.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.setMode('explore');
+    });
+    this.stripBar.appendChild(this.weatherExit);
+
     this.weatherSlots = WEATHERS.map((w) => {
       const el = document.createElement('button');
       el.className = 'slot weather-w';
@@ -2990,7 +3108,7 @@ class Game {
     if (mode === 'weather') {
       this.mode = 'weather';
       const wi = WEATHERS.findIndex((w) => w.id === this.weather);
-      this.stripFocus = wi < 0 ? 0 : wi;
+      this.stripFocus = wi < 0 ? 1 : wi + 1;
       sfx.swap();
       this.toast('Weather — stick moves, A activates, Y closes', 'good');
       this.refreshStrips();
@@ -3045,11 +3163,15 @@ class Game {
       el.classList.toggle('active', weapon && i + 1 === weaponFocus);
     });
     const weatherFocus = weather
-      ? (this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather)))
+      ? (this.stripFocus ?? (Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather)) + 1))
       : -1;
+    if (this.weatherExit) {
+      this.weatherExit.style.display = weather ? '' : 'none';
+      this.weatherExit.classList.toggle('active', weather && weatherFocus === 0);
+    }
     this.weatherSlots.forEach((el, i) => {
       el.style.display = weather ? '' : 'none';
-      el.classList.toggle('active', weather && i === weatherFocus);
+      el.classList.toggle('active', weather && i + 1 === weatherFocus);
     });
     this.modeSlots.forEach((el, i) => el.classList.toggle('active', MODES[i].id === this.mode));
     this.syncWeaponRig();
@@ -3070,11 +3192,50 @@ class Game {
   }
 
   /* Strip index 0 is the empty tile. UFO launches but is never kept. */
+  startFlight(index) {
+    if (this.world.inHouse) {
+      this.world.exitHouse();
+      this.applyOutdoorFog();
+    }
+    this.player.yaw = this.orbit.yaw;
+    this.player.lookYaw = this.orbit.yaw;
+    this.player.flying = true;
+    this.player.liftT = 0;
+    this.player.setPropeller(true);
+    this.equipped = index;
+    this.weapon = index;
+    sfx.setRotor(true);
+    this.toast('Propeller head — you are flying', 'good');
+  }
+
+  stopFlight(opts = {}) {
+    const was = !!(this.player && this.player.flying);
+    if (this.player) {
+      this.player.flying = false;
+      this.player.liftT = 0;
+      this.player.setPropeller(false);
+      if (was) this.player.vel.y = 0;
+    }
+    sfx.setRotor(false);
+    if (this.equipped != null && WEAPONS[this.equipped] && WEAPONS[this.equipped].kind === 'prop') {
+      this.equipped = null;
+    }
+    if (was && !opts.quiet) this.toast('Landed', 'good');
+    if (was) this.refreshStrips();
+  }
+
   confirmWeapon(focus) {
     this.stripFocus = focus;
     if (focus <= 0) { this.unequipWeapon(); return; }
     const def = WEAPONS[focus - 1];
     voice.speak(def.name);
+    if (def.kind === 'prop') {
+      if (this.player.flying) this.stopFlight();
+      else this.startFlight(focus - 1);
+      this.refreshStrips();
+      return;
+    }
+    if (this.player.flying) this.stopFlight();
     if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost') {
       if (def.kind === 'ufo') {
         if (!this.saucer) this.launchSaucer();
@@ -3091,6 +3252,7 @@ class Game {
   }
 
   unequipWeapon() {
+    if (this.player && this.player.flying) this.stopFlight();
     this.equipped = null;
     this.stripFocus = 0;
     if (this.mode !== 'explore') this.setMode('explore');
@@ -3107,8 +3269,8 @@ class Game {
       return;
     }
     if (this.mode !== 'weather') return;
-    const n = WEATHERS.length;
-    const cur = this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather));
+    const n = WEATHERS.length + 1;
+    const cur = this.stripFocus ?? 1;
     this.stripFocus = (cur + dir + n) % n;
     this.refreshStrips();
   }
@@ -3119,8 +3281,9 @@ class Game {
       return;
     }
     if (this.mode !== 'weather') return;
-    const i = this.stripFocus ?? Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather));
-    this.onWeatherClick(WEATHERS[i].id);
+    const i = this.stripFocus ?? 1;
+    if (i <= 0) { this.setMode('explore'); return; }
+    this.onWeatherClick(WEATHERS[i - 1].id);
   }
 
   /* Left/right while a strip is open: step the highlighted icon. */
@@ -3160,7 +3323,7 @@ class Game {
     voice.speak(def.name);
     this.weather = def.id;
     const fi = WEATHERS.findIndex((w) => w.id === def.id);
-    if (fi >= 0) this.stripFocus = fi;
+    if (fi >= 0) this.stripFocus = fi + 1;
     this.weatherDef = def;
     this.weatherT = 0;
     this.weatherDmgT = 0;
@@ -3304,7 +3467,7 @@ class Game {
   armedWeapon() {
     if (this.equipped == null) return null;
     const def = WEAPONS[this.equipped];
-    if (!def || this.isScenario(def)) return null;
+    if (!def || this.isScenario(def) || def.kind === 'prop') return null;
     return def;
   }
 
@@ -4560,6 +4723,7 @@ class Game {
     this.weapon = 0;
     this.equipped = null;
     this.stripFocus = 0;
+    if (this.player && this.player.flying) this.stopFlight({ quiet: true });
     if (this.weaponModels) this.showWeaponModel();
     this.defuseNuke();
     this.clearSaucer();
@@ -4848,6 +5012,7 @@ class Game {
      after it connects; we also scan each frame so a pad that was already
      paired is picked up without a settings screen. */
   bindGamepad() {
+    this.padMap = loadPadMap();
     this.padVec = { x: 0, y: 0 };
     this.padFire = false;
     this._padIndex = null;
@@ -4868,7 +5033,7 @@ class Game {
     this._padIndex = gp.index;
     this._padPrev = [];
     const name = String(gp.id || 'Controller').split('(')[0].trim();
-    this.toast(name + ' — X weapons, Y weather, A select, L+R reset', 'good');
+    this.toast(name + ' ready. Map buttons in options.', 'good');
   }
 
   pollGamepad(dt) {
@@ -4901,26 +5066,41 @@ class Game {
       return { down, edge, value };
     };
     const b = [];
-    for (let i = 0; i < 16; i++) b[i] = btn(i);
+    const count = Math.max(16, gp.buttons.length);
+    for (let i = 0; i < count; i++) b[i] = btn(i);
+    const act = (id) => {
+      const map = this.padMap || DEFAULT_PAD;
+      const n = typeof map[id] === 'number' ? map[id] : DEFAULT_PAD[id];
+      return b[n] || { down: false, edge: false, value: 0 };
+    };
 
+    if (this.panel?.mapping) {
+      this.padVec.x = 0;
+      this.padVec.y = 0;
+      this.padFire = false;
+      for (let i = 0; i < b.length; i++) {
+        if (b[i] && b[i].edge) { this.panel.captureButton(i); break; }
+      }
+      return;
+    }
     if (this.panel?.isOpen) {
       this.padVec.x = 0;
       this.padVec.y = 0;
       this.padFire = false;
-      if (b[1].edge && this.panel.close) this.panel.close();
+      if (act('back').edge && this.panel.close) this.panel.close();
       return;
     }
     const selectMode = this.mode === 'weapon' || this.mode === 'weather';
     let lx = axis(gp.axes[0]);
     let ly = axis(gp.axes[1]);
-    if (b[12].down) ly = -1;
-    if (b[13].down) ly = 1;
+    if (act('forward').down) ly = -1;
+    if (act('backMove').down) ly = 1;
     if (selectMode) {
       this.padVec.x = 0;
       this.padVec.y = ly;
     } else {
-      if (b[14].down) lx = -1;
-      if (b[15].down) lx = 1;
+      if (act('left').down) lx = -1;
+      if (act('right').down) lx = 1;
       this.padVec.x = lx;
       this.padVec.y = ly;
     }
@@ -4946,27 +5126,32 @@ class Game {
       this[slot] = now;
       return true;
     };
-    if (selectMode && (repeat('_padDpadL', b[14]) || hold('_padStickL', lx < -0.35))) this.moveStripFocus(-1);
-    if (selectMode && (repeat('_padDpadR', b[15]) || hold('_padStickR', lx > 0.35))) this.moveStripFocus(1);
-    const bumpers = b[4].down && b[5].down;
-    if (bumpers && (b[4].edge || b[5].edge)) this.resetSmallWorld();
-    else if (!bumpers) {
-      if (b[4].down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
-      if (b[5].down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
+    const leftBtn = act('left');
+    const rightBtn = act('right');
+    if (selectMode && (repeat('_padDpadL', leftBtn) || hold('_padStickL', lx < -0.35))) this.moveStripFocus(-1);
+    if (selectMode && (repeat('_padDpadR', rightBtn) || hold('_padStickR', lx > 0.35))) this.moveStripFocus(1);
+    const zoomOut = act('zoomOut');
+    const zoomIn = act('zoomIn');
+    const bothZoom = zoomOut.down && zoomIn.down;
+    if (bothZoom && (zoomOut.edge || zoomIn.edge)) this.resetSmallWorld();
+    else if (!bothZoom) {
+      if (zoomOut.down) this.orbit.wantDist = clamp(this.orbit.wantDist + dt * 10, 4.5, 26);
+      if (zoomIn.down) this.orbit.wantDist = clamp(this.orbit.wantDist - dt * 10, 4.5, 26);
     }
 
+    const confirm = act('confirm');
     const armed = this.mode === 'explore' && !!this.armedWeapon();
-    if (this.mode === 'explore' && b[0].edge) {
+    if (this.mode === 'explore' && confirm.edge) {
       if (this.doorAction) this.toggleDoor();
       else if (!armed) this.jumpQueued = 0.16;
     }
-    if (this.mode === 'weather' && b[0].edge) this.confirmStrip();
-    if (this.mode === 'weapon' && b[0].edge) this.confirmWeapon(this.stripFocus ?? 0);
-    if (b[1].edge && selectMode) this.setMode('explore');
-    if (b[2].edge) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon');
-    if (b[3].edge) this.setMode(this.mode === 'weather' ? 'explore' : 'weather');
-    this.padFire = armed && !this.doorAction && b[0].down;
-    if (b[7].edge && this.mode === 'build') this.padUse();
+    if (this.mode === 'weather' && confirm.edge) this.confirmStrip();
+    if (this.mode === 'weapon' && confirm.edge) this.confirmWeapon(this.stripFocus ?? 0);
+    if (act('back').edge && selectMode) this.setMode('explore');
+    if (act('weapons').edge) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon');
+    if (act('weather').edge) this.setMode(this.mode === 'weather' ? 'explore' : 'weather');
+    this.padFire = armed && !this.doorAction && confirm.down;
+    if (act('use').edge && this.mode === 'build') this.padUse();
   }
 
   padUse() {
@@ -5364,6 +5549,7 @@ class Game {
     const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const move = { x: fwd.x * -mz + right.x * mx, z: fwd.z * -mz + right.z * mx };
 
+    this.player.lookYaw = yaw;
     this.updateFlood(dt);
     this.player.update(dt, move, this.jumpQueued > 0);
     DBG.sample();

@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
-<link rel="stylesheet" href="src/styles.css?v=7" />
+<link rel="stylesheet" href="src/styles.css?v=11" />
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -50,6 +50,7 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
 }
 #panel-goal.collapsed .goal-body, #panel-goal.collapsed #goal-close { display: none; }
 #panel-goal.collapsed #goal-mark { display: grid; place-items: center; }
+#joystick { bottom: calc(clamp(84px, 18vh, 140px) + 28px); }
 </style>
 </head>
 <body>
@@ -135,17 +136,25 @@ body.touch #btn-weapon, body.touch #btn-weather { display: block; }
     document.head.appendChild(map);
     var app = document.createElement('script');
     app.type = 'module';
-    app.src = 'src/main.js?v=7';
+    app.src = 'src/main.js?v=12';
     document.body.appendChild(app);
   }
-  (async function () {
+  async function localThreeExists() {
     try {
-      var res = await fetch(localThree, { method: 'HEAD' });
-      if (!res.ok) throw new Error('three missing');
-      installMap(localThree, localAddons);
-    } catch (err) {
-      installMap(cdnThree, cdnAddons);
-    }
+      var head = await fetch(localThree, { method: 'HEAD' });
+      if (head.ok) return true;
+    } catch (e) {}
+    try {
+      var got = await fetch(localThree, { headers: { Range: 'bytes=0-0' } });
+      if (!(got.ok || got.status === 206)) return false;
+      await got.arrayBuffer();
+      return true;
+    } catch (e) {}
+    return false;
+  }
+  (async function () {
+    if (await localThreeExists()) installMap(localThree, localAddons);
+    else installMap(cdnThree, cdnAddons);
   })();
 })();
 </script>

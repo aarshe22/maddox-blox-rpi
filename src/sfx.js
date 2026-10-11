@@ -141,6 +141,30 @@ class Sfx {
     if (L.osc) L.osc.stop(t + 0.35);
   }
   unloopAll() { for (const k of [...this._loops.keys()]) this.unloop(k); }
+  /* Propeller whir, separate from weather loops so a sky change does not cut it. */
+  setRotor(on) {
+    if (on) {
+      if (!this.ensure() || this._rotor) return;
+      const t = this.ac.currentTime;
+      const src = this.ac.createBufferSource(); src.buffer = this._noiseBuf(); src.loop = true;
+      const flt = this.ac.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = 180; flt.Q.value = 0.7;
+      const lfo = this.ac.createOscillator(); lfo.frequency.value = 28;
+      const lg = this.ac.createGain(); lg.gain.value = 90;
+      lfo.connect(lg); lg.connect(flt.frequency); lfo.start(t);
+      const g = this.ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.11, t + 0.12);
+      src.connect(flt); flt.connect(g); g.connect(this.master);
+      src.start(t);
+      this._rotor = { src, g, lfo };
+    } else if (this._rotor) {
+      const t = this.ac.currentTime;
+      const { src, g, lfo } = this._rotor;
+      this._rotor = null;
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
+      g.gain.linearRampToValueAtTime(0.0001, t + 0.18);
+      src.stop(t + 0.25); lfo.stop(t + 0.25);
+    }
+  }
 }
 
 export const sfx = new Sfx();

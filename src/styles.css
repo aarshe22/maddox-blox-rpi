@@ -248,7 +248,7 @@ body.touch #panel-hint { display: none; }
 
 #joystick {
   position: absolute;
-  left: 22px; bottom: 92px;
+  left: 22px; bottom: calc(clamp(84px, 18vh, 140px) + 28px);
   width: 118px; height: 118px;
   border-radius: 50%;
   background: rgba(255,255,255,.35);
@@ -358,57 +358,81 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
   background: rgba(20, 30, 50, 0.42);
   backdrop-filter: blur(3px);
   pointer-events: auto;
-  touch-action: pan-y;
+  touch-action: none;
+  overflow: hidden;
 }
-#options.open { display: grid; place-items: center; }
+#options.open { display: block; }
 #options .o-card {
-  width: min(520px, 94vw);
-  max-height: min(84vh, 90vh);
-  overflow-y: auto;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(1040px, calc(100vw - 16px));
+  max-height: none;
+  overflow: visible;
   background: #fff;
   border: 3px solid rgba(28, 36, 51, 0.25);
   border-radius: 18px;
   box-shadow: 0 16px 40px rgba(10, 20, 40, 0.4);
-  padding: 16px 18px 18px;
+  padding: 10px 12px 12px;
   color: var(--ink);
-  overscroll-behavior: contain;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
 }
-#options .o-head { display: flex; justify-content: space-between; align-items: center; font-size: 20px; margin-bottom: 6px; }
-#options .o-x { border: none; background: #eef1f6; border-radius: 10px; width: 34px; height: 34px; font-size: 16px; cursor: pointer; }
-#options .o-sec { display: block; font-size: 12px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #6a7688; margin: 12px 0 6px; }
+#options .o-fit {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 2px 18px;
+  align-items: start;
+}
+#options .o-head { display: flex; justify-content: space-between; align-items: center; font-size: 18px; margin-bottom: 2px; }
+#options .o-x { border: none; background: #eef1f6; border-radius: 10px; width: 32px; height: 32px; font-size: 16px; cursor: pointer; }
+#options .o-sec { display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #6a7688; margin: 6px 0 3px; }
 #options .o-seg { display: flex; gap: 6px; }
 #options .o-seg button {
-  flex: 1; padding: 9px 0; border-radius: 10px;
+  flex: 1; padding: 6px 0; border-radius: 10px;
   border: 2px solid var(--edge); background: #f4f6fa;
   font-weight: 700; font-size: 13px; color: var(--ink); cursor: pointer;
   line-height: 1.15;
 }
 #options .o-seg button.active { background: #2f7de1; border-color: #1b5cb4; color: #fff; }
-#options .o-row { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eef1f6; }
-#options .o-name { font-size: 14px; font-weight: 700; grid-column: 1 / 3; }
-#options .o-row input[type=range] { grid-column: 1; grid-row: 2; width: 100%; accent-color: var(--accent); }
-#options .o-val { grid-column: 2; grid-row: 2; font-size: 14px; min-width: 2ch; text-align: right; }
-#options .o-sw { grid-column: 3; grid-row: 1 / 3; }
+#options .o-rows .o-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(72px, 1fr) 2.4ch auto;
+  gap: 2px 6px;
+  align-items: center;
+  padding: 2px 0;
+  border-bottom: 1px solid #eef1f6;
+}
+#options .o-rows .o-name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#options .o-rows .o-row input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+#options .o-rows .o-val { font-size: 12px; min-width: 2ch; text-align: right; }
+#options .o-row.o-toggles { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; padding: 1px 0; border-bottom: none; }
 #options .o-sw input { width: 40px; height: 22px; appearance: none; background: #c9d2de; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s; }
 #options .o-sw input:checked { background: #43d46c; }
 #options .o-sw input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 #options .o-sw input:checked::after { left: 20px; }
 #options .o-row.off .o-name, #options .o-row.off input[type=range] { opacity: 0.38; }
-#options .o-row.o-toggles { grid-template-columns: 1fr auto; border-bottom: none; }
 #options .o-toggle {
-  padding: 10px 14px; font-size: 14px; font-weight: 700; text-align: left;
+  padding: 6px 10px; font-size: 13px; font-weight: 700; text-align: left;
   border-radius: 10px; border: 2px solid #c9d2de; background: #eef1f6; color: #3c4654; cursor: pointer;
 }
 #options .o-toggle.on { background: #d9f5e2; border-color: #2fa15a; color: #14502a; }
 #options .o-copy {
-  padding: 10px 12px; font-size: 13px; font-weight: 700; border-radius: 10px;
+  padding: 6px 10px; font-size: 12px; font-weight: 700; border-radius: 10px;
   border: 2px solid #c9d2de; background: #fff; color: #3c4654; cursor: pointer;
 }
 #options .o-copy:active { transform: scale(0.97); }
-#options .o-note { font-size: 12px; color: #6a7688; margin-top: 12px; }
-#options .o-actions { margin-top: 12px; }
+#options .o-pad-actions { display: flex; gap: 6px; }
+#options .o-pad-go, #options .o-pad-std {
+  flex: 1; padding: 7px 8px; font-size: 13px; font-weight: 800; cursor: pointer;
+  border-radius: 10px; border: 2px solid var(--edge); background: #f4f6fa; color: var(--ink);
+}
+#options .o-pad-go { background: #2f7de1; border-color: #1b5cb4; color: #fff; }
+#options .o-pad-step { margin: 6px 0 0; min-height: 2.5em; font-size: 12px; line-height: 1.35; color: #243044; }
+#options .o-note { font-size: 11px; color: #6a7688; margin-top: 6px; }
+#options .o-actions { margin-top: 6px; }
 #options .o-regen {
-  width: 100%; padding: 13px 0; font-size: 16px; font-weight: 800;
+  width: 100%; padding: 8px 0; font-size: 15px; font-weight: 800;
   border-radius: 12px; border: 3px solid rgba(255,255,255,.6);
   background: var(--accent); color: #40220a; cursor: pointer;
 }
@@ -456,6 +480,10 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
   box-shadow: 0 4px 0 #c94f06;
 }
 #btn-play:active { transform: translateY(3px); box-shadow: 0 1px 0 #c94f06; }
+
+@media (max-width: 760px) {
+  #options .o-fit { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 620px) {
   #panel-goal { padding: 8px 10px; }

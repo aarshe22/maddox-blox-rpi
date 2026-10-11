@@ -14,7 +14,8 @@ export const WEAPONS = [
   { id: 'jack',   name: 'Jack-o-lantern', icon: '🎃', dmg: 0, radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'halloween' },
   { id: 'flood',  name: 'Biblical Flood', icon: '🌊', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'flood' },
   { id: 'drop',   name: 'Water Drop', icon: '💧', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'water' },
-  { id: 'frost',  name: 'Snowflake', icon: '❄️', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'frost' }
+  { id: 'frost',  name: 'Snowflake', icon: '❄️', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'frost' },
+  { id: 'prop',   name: 'Propeller Head', icon: '🚁', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 0.4, kind: 'prop' }
 ];
 
 /* -------------------------------------------------------------------- FX */

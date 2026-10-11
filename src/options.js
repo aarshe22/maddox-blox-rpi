@@ -96,6 +96,76 @@ export function saveOptions(o) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(o)); } catch (e) { /* private mode */ }
 }
 
+/* Each step of the mapper asks for one of these. Sticks stay analog. */
+export const PAD_ACTIONS = [
+  { id: 'confirm', label: 'Jump, select, or fire' },
+  { id: 'back', label: 'Back' },
+  { id: 'weapons', label: 'Weapons' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'zoomOut', label: 'Zoom out' },
+  { id: 'zoomIn', label: 'Zoom in' },
+  { id: 'use', label: 'Place a brick' },
+  { id: 'forward', label: 'Move forward' },
+  { id: 'backMove', label: 'Move back' },
+  { id: 'left', label: 'Move left' },
+  { id: 'right', label: 'Move right' }
+];
+
+export const DEFAULT_PAD = {
+  confirm: 0, back: 1, weapons: 2, weather: 3,
+  zoomOut: 4, zoomIn: 5, use: 7,
+  forward: 12, backMove: 13, left: 14, right: 15
+};
+
+const PAD_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'Back', 'Start', 'L3', 'R3', 'Up', 'Down', 'Left', 'Right'];
+const PAD_COOKIE = 'maddox_pad';
+const PAD_AGE = 60 * 60 * 24 * 365 * 10;
+
+export function padButtonName(i) {
+  return PAD_NAMES[i] || ('Btn ' + i);
+}
+
+function cleanPad(map) {
+  const out = { ...DEFAULT_PAD };
+  if (!map) return out;
+  for (const a of PAD_ACTIONS) {
+    const n = Number(map[a.id]);
+    if (Number.isInteger(n) && n >= 0 && n < 32) out[a.id] = n;
+  }
+  return out;
+}
+
+/* A long-lived cookie, not session storage, so a reboot or a fresh tab keeps it. */
+export function savePadMap(map) {
+  const clean = cleanPad(map);
+  const body = encodeURIComponent(PAD_ACTIONS.map((a) => a.id + ':' + clean[a.id]).join('.'));
+  const expires = new Date(Date.now() + PAD_AGE * 1000).toUTCString();
+  document.cookie = PAD_COOKIE + '=' + body + '; expires=' + expires + '; max-age=' + PAD_AGE + '; path=/; SameSite=Lax';
+  return clean;
+}
+
+export function loadPadMap() {
+  try {
+    const parts = ('; ' + document.cookie).split('; ' + PAD_COOKIE + '=');
+    if (parts.length < 2) return { ...DEFAULT_PAD };
+    const raw = decodeURIComponent(parts.pop().split(';')[0]);
+    const map = {};
+    for (const pair of raw.split('.')) {
+      const cut = pair.indexOf(':');
+      if (cut < 1) continue;
+      map[pair.slice(0, cut)] = Number(pair.slice(cut + 1));
+    }
+    return cleanPad(map);
+  } catch (e) {
+    return { ...DEFAULT_PAD };
+  }
+}
+
+export function padSummary(map) {
+  const m = cleanPad(map);
+  return PAD_ACTIONS.map((a) => padButtonName(m[a.id]) + ' ' + a.label).join(' · ');
+}
+
 // Builds the modal DOM. `opts` is mutated live; hooks = { onOpen, onRegen }.
 export function buildOptionsPanel(opts, hooks = {}) {
   const el = document.createElement('div');
@@ -103,27 +173,41 @@ export function buildOptionsPanel(opts, hooks = {}) {
   el.innerHTML = `
     <div class="o-card">
       <div class="o-head"><b>World options</b><button class="o-x" title="Close">✕</button></div>
-      <label class="o-sec">Resolution</label>
-      <div class="o-seg o-res">${RESOLUTIONS.map((r) => `<button data-res="${r.id}">${r.label}<br>${r.detail}</button>`).join('')}</div>
-      <label class="o-sec">Map size</label>
-      <div class="o-seg o-size">${SIZES.map((s) => `<button data-size="${s.id}">${s.label}</button>`).join('')}</div>
-      <label class="o-sec">Objects — count &amp; on/off</label>
-      <div class="o-rows"></div>
-      <label class="o-sec">Birds</label>
-      <div class="o-row o-toggles">
-        <button class="o-toggle o-birds" title="Birds are off until you turn them on. Applies when the world regenerates."></button>
+      <div class="o-fit">
+        <div>
+          <label class="o-sec">Resolution</label>
+          <div class="o-seg o-res">${RESOLUTIONS.map((r) => `<button data-res="${r.id}">${r.label}<br>${r.detail}</button>`).join('')}</div>
+          <label class="o-sec">Map size</label>
+          <div class="o-seg o-size">${SIZES.map((s) => `<button data-size="${s.id}">${s.label}</button>`).join('')}</div>
+          <label class="o-sec">Birds</label>
+          <div class="o-row o-toggles">
+            <button class="o-toggle o-birds" title="Birds are off until you turn them on. Applies when the world regenerates."></button>
+          </div>
+          <label class="o-sec">Sound &amp; voice</label>
+          <div class="o-row o-toggles">
+            <button class="o-toggle o-snd" title="Read aloud weapon, block and weather selections; click to mute everything"></button>
+          </div>
+          <label class="o-sec">Developer</label>
+          <div class="o-row o-toggles">
+            <button class="o-toggle o-dbg" title="Logs player physics frames to find fall-through bugs"></button>
+            <button class="o-copy" title="Copy all captured debug rows to the clipboard">📋 Copy debug log</button>
+          </div>
+          <label class="o-sec">Controller</label>
+          <div class="o-pad">
+            <div class="o-pad-actions">
+              <button type="button" class="o-pad-go">Map controller</button>
+              <button type="button" class="o-pad-std">Standard buttons</button>
+            </div>
+            <p class="o-pad-step" aria-live="polite"></p>
+          </div>
+          <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate.</div>
+          <div class="o-actions"><button class="o-regen">♻️ Regenerate world</button></div>
+        </div>
+        <div>
+          <label class="o-sec">Objects — count &amp; on/off</label>
+          <div class="o-rows"></div>
+        </div>
       </div>
-      <label class="o-sec">Sound &amp; voice</label>
-      <div class="o-row o-toggles">
-        <button class="o-toggle o-snd" title="Read aloud weapon, block and weather selections; click to mute everything"></button>
-      </div>
-      <label class="o-sec">Developer</label>
-      <div class="o-row o-toggles">
-        <button class="o-toggle o-dbg" title="Logs player physics frames to find fall-through bugs"></button>
-        <button class="o-copy" title="Copy all captured debug rows to the clipboard">📋 Copy debug log</button>
-      </div>
-      <div class="o-note">Resolution applies right away. Map and object changes apply when you regenerate.</div>
-      <div class="o-actions"><button class="o-regen">♻️ Regenerate world</button></div>
     </div>`;
 
   const rowsWrap = el.querySelector('.o-rows');
@@ -223,26 +307,100 @@ export function buildOptionsPanel(opts, hooks = {}) {
   syncSound();
   syncDebug();
 
+  const stepEl = el.querySelector('.o-pad-step');
+  const padGo = el.querySelector('.o-pad-go');
+  let padDraft = loadPadMap();
+  let padStep = 0;
+
+  const showPad = (text) => { stepEl.textContent = text; };
+  const showSaved = (map) => {
+    showPad(padSummary(map));
+  };
+  showSaved(padDraft);
+
+  function fitCard() {
+    const card = el.querySelector('.o-card');
+    card.style.transform = 'translate(-50%, -50%)';
+    if (!card.offsetHeight || !card.offsetWidth) return;
+    const availH = window.innerHeight - 12;
+    const availW = window.innerWidth - 12;
+    const s = Math.min(1, availH / card.offsetHeight, availW / card.offsetWidth);
+    card.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+
+  function beginPadMap() {
+    padDraft = loadPadMap();
+    padStep = 0;
+    api.mapping = true;
+    padGo.textContent = 'Mapping…';
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    askPad();
+    requestAnimationFrame(fitCard);
+  }
+
+  function askPad() {
+    const action = PAD_ACTIONS[padStep];
+    showPad(`Press a button for: ${action.label} (${padStep + 1} of ${PAD_ACTIONS.length}). Sticks stay on move and look.`);
+  }
+
+  function finishPad(map) {
+    api.mapping = false;
+    padDraft = map;
+    padGo.textContent = 'Map controller';
+    showSaved(map);
+    if (hooks.onPad) hooks.onPad(map);
+    requestAnimationFrame(fitCard);
+  }
+
+  padGo.addEventListener('click', (e) => {
+    e.preventDefault();
+    beginPadMap();
+  });
+  el.querySelector('.o-pad-std').addEventListener('click', (e) => {
+    e.preventDefault();
+    finishPad(savePadMap(DEFAULT_PAD));
+  });
+
   const api = {
     el,
     isOpen: false,
+    mapping: false,
     open() {
       api.refresh();
       el.classList.add('open');
       api.isOpen = true;
       if (hooks.onOpen) hooks.onOpen();
+      requestAnimationFrame(fitCard);
     },
     close() {
+      api.mapping = false;
+      padGo.textContent = 'Map controller';
+      showSaved(loadPadMap());
       el.classList.remove('open');
       api.isOpen = false;
       saveOptions(opts);
     },
     toggle() { if (api.isOpen) api.close(); else api.open(); },
-    refresh() { syncSegs(); syncRes(); for (const s of syncers) s(); syncBirds(); syncSound(); syncDebug(); },
-    syncDebug() { syncDebug(); }
+    refresh() { syncSegs(); syncRes(); for (const s of syncers) s(); syncBirds(); syncSound(); syncDebug(); if (!api.mapping) showSaved(loadPadMap()); },
+    syncDebug() { syncDebug(); },
+    fit: fitCard,
+    captureButton(button) {
+      if (!api.mapping) return;
+      const action = PAD_ACTIONS[padStep];
+      if (!action) return;
+      const previous = padDraft[action.id];
+      for (const other of PAD_ACTIONS) {
+        if (other.id !== action.id && padDraft[other.id] === button) padDraft[other.id] = previous;
+      }
+      padDraft[action.id] = button;
+      padStep += 1;
+      if (padStep >= PAD_ACTIONS.length) finishPad(savePadMap(padDraft));
+      else askPad();
+    }
   };
 
   el.querySelector('.o-x').addEventListener('click', () => api.close());
+  window.addEventListener('resize', () => { if (api.isOpen) fitCard(); });
   el.querySelector('.o-regen').addEventListener('click', () => {
     saveOptions(opts);
     if (hooks.onRegen) hooks.onRegen();
