@@ -1,6 +1,6 @@
 # Maddox Blox
 
-Brick-toy Three.js sandbox. No build step. Work only in this repo: `/Users/localuser/CODE/maddox-blox-rpi`.
+Brick-toy Three.js sandbox. No build step today; a bundled compatibility build is planned as future work. Work only in this repo: `/Users/localuser/CODE/maddox-blox-rpi`.
 
 Git remote: `https://github.com/aarshe22/maddox-blox-rpi.git`, branch `main`. Live site: `https://blox.badlandscloud.com`. Do not commit, push, or SSH unless the user asks. Current handoff state is in `PLAN.md`.
 
@@ -63,3 +63,13 @@ UFO and tornado are toggles. Selecting either again sends it away. Selecting it 
 - Colliders that must never support building (trees, bridge pieces, ground) are `noSupport`.
 - No LEGO trademarks, logos, set names, or minifigure designs in UI or assets.
 - Verify UI changes in the browser, then stop the server. `node --check` each edited module.
+
+## Future browser compatibility plan
+
+The current runtime import-map approach is not the long-term compatibility target. iPadOS 15.8.8 / Safari 15 has failed to start the game even with an ES Module Shims fallback. Do not keep layering runtime loader shims unless specifically asked.
+
+Future migration: introduce Vite and build the game into browser-ready static assets. Remove the runtime import map and CDN/module-loader dependency from production. Bundle Three.js and its addons with the game, set an explicit Safari 15 / iPadOS 15 build target (using legacy/transpilation support as required), and keep the existing Pi-oriented renderer/performance settings. Production/Plesk should serve the compiled output rather than raw source modules.
+
+As part of that migration, add a visible startup/fatal-error panel so unsupported syntax, missing assets, WebGL/context failures, and initialization exceptions do not present as a blank play area. Add feature detection/fallbacks for graphics capabilities used by the game and verify both older iPadOS 15 Safari/WebKit and current desktop/mobile browsers. Preserve the current static/Plesk deployment model where practical; a GitHub Actions build/deploy artifact may be added later so deployment can remain pull-based.
+
+Do not perform this migration incidentally during unrelated work. Treat it as a dedicated compatibility task and verify the generated production build before switching the live site.
