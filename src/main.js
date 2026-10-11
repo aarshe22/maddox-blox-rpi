@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize } from './options.js';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize } from './options.js?v=7';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox } from './weaponry.js';
 import { sfx } from './sfx.js';
