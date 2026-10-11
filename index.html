@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
 <link rel="stylesheet" href="src/styles.css?v=18" />
+<script async src="https://ga.jspm.io/npm:es-module-shims@2.8.4/dist/es-module-shims.js"></script>
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -49,10 +50,64 @@ try {
 #panel-goal.collapsed .goal-body, #panel-goal.collapsed #goal-close { display: none; }
 #panel-goal.collapsed #goal-mark { display: grid; place-items: center; }
 #joystick { bottom: calc(clamp(84px, 18vh, 140px) + 28px); }
+
+#bootstrap-options{position:fixed;top:10px;right:24px;z-index:50;width:64px;height:64px;border-radius:50%;border:3px solid rgba(255,255,255,.8);background:rgba(255,255,255,.92);font-size:32px;pointer-events:auto;-webkit-appearance:none;appearance:none}
+#bootstrap-panel{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.72);padding:12px;overflow:auto;touch-action:auto}
+#bootstrap-panel[hidden]{display:none}
+.bootstrap-card{position:relative;margin:20px auto;max-width:720px;background:#fff;color:#172033;border-radius:16px;padding:18px;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 16px 50px rgba(0,0,0,.35)}
+.bootstrap-card h2{margin:0 42px 6px 0}.bootstrap-card p{margin:6px 0 12px}.bootstrap-card pre{white-space:pre-wrap;word-break:break-word;background:#101827;color:#e5edf8;padding:12px;border-radius:10px;max-height:45vh;overflow:auto;-webkit-user-select:text;user-select:text}
+#bootstrap-close{position:absolute;right:12px;top:10px;width:38px;height:38px;border:0;border-radius:10px;font-size:28px}.bootstrap-actions{display:flex;gap:8px;flex-wrap:wrap}.bootstrap-actions button{padding:10px 12px;border:1px solid #aab4c4;border-radius:10px;background:#f5f7fa;font-weight:700}.bootstrap-note{font-size:12px;color:#667085}
 </style>
 </head>
 <body>
 <canvas id="scene"></canvas>
+
+<button id="bootstrap-options" type="button" aria-label="Options and diagnostics">⚙️</button>
+<div id="bootstrap-panel" hidden>
+  <div class="bootstrap-card">
+    <button id="bootstrap-close" type="button" aria-label="Close">×</button>
+    <h2>Maddox Blox</h2>
+    <p id="bootstrap-status">Starting game…</p>
+    <div class="bootstrap-actions">
+      <button id="bootstrap-copy" type="button">📋 Copy diagnostics</button>
+      <button id="bootstrap-reload" type="button">↻ Reload game</button>
+    </div>
+    <pre id="bootstrap-log"></pre>
+    <p class="bootstrap-note">This panel does not depend on Three.js. The full game options will replace it after startup.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var lines = [];
+  var panel = document.getElementById("bootstrap-panel");
+  var log = document.getElementById("bootstrap-log");
+  var status = document.getElementById("bootstrap-status");
+  function describe(v) { try { return v && v.stack ? v.stack : String(v); } catch (_) { return "[unprintable]"; } }
+  function add(kind, msg) {
+    var line = new Date().toISOString() + " [" + kind + "] " + describe(msg);
+    lines.push(line); if (lines.length > 100) lines.shift();
+    if (log) log.textContent = lines.join("\n");
+  }
+  function snapshot() {
+    var gl = "";
+    try { var c=document.createElement("canvas"); gl=!!(c.getContext("webgl2")||c.getContext("webgl")||c.getContext("experimental-webgl")); } catch(e) { gl="error: "+describe(e); }
+    return ["Maddox Blox bootstrap diagnostics","URL: "+location.href,"UA: "+navigator.userAgent,"Platform: "+navigator.platform,"Touch points: "+(navigator.maxTouchPoints||0),"WebGL available: "+gl,"Native import maps: "+!!(window.HTMLScriptElement&&HTMLScriptElement.supports&&HTMLScriptElement.supports("importmap")),"es-module-shims: "+(typeof window.importShim==="function"?"ready":"not ready"),""].join("\n")+lines.join("\n");
+  }
+  window.MB_BOOT = { add:add, fail:function(e){ add("FATAL",e); status.textContent="Game startup failed — diagnostics captured below."; panel.hidden=false; }, ready:function(){ add("READY","Game module started"); status.textContent="Game module started."; }, dump:snapshot };
+  add("BOOT","Bootstrap UI loaded");
+  window.addEventListener("error",function(e){ add("ERROR",(e.message||"error")+" @ "+(e.filename||"")+" :"+(e.lineno||0)+":"+(e.colno||0)); if(e.error)add("STACK",e.error); });
+  window.addEventListener("unhandledrejection",function(e){ add("REJECTION",e.reason); });
+  document.getElementById("bootstrap-options").onclick=function(){ panel.hidden=false; };
+  document.getElementById("bootstrap-close").onclick=function(){ panel.hidden=true; };
+  document.getElementById("bootstrap-reload").onclick=function(){ location.reload(); };
+  document.getElementById("bootstrap-copy").onclick=function(){
+    var text=snapshot(), btn=this;
+    function done(ok){ btn.textContent=ok?"✅ Diagnostics copied":"Copy failed — select log below"; setTimeout(function(){btn.textContent="📋 Copy diagnostics";},2200); }
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){done(true);},function(){done(false);}); return; }
+    try { var ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.focus(); ta.select(); var ok=document.execCommand("copy"); ta.remove(); done(ok); } catch(e){ add("COPY",e); done(false); }
+  };
+})();
+</script>
 
 <div id="hud">
   <div class="panel" id="panel-goal">
@@ -127,48 +182,29 @@ try {
 </div>
 
 <script>
-/* Pi keeps three in node_modules. A host without that folder loads the same release from a CDN. */
+/* Safari 15 interim loader: es-module-shims is declared in <head>; wait for importShim before starting. */
 (function () {
   if (location.protocol === 'file:') return;
   var localThree = './node_modules/three/build/three.module.js';
   var localAddons = './node_modules/three/examples/jsm/';
   var cdnThree = 'https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js';
   var cdnAddons = 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/';
-  var needsShim = !(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
-  if (needsShim) {
-    var shim = document.createElement('script');
-    shim.async = true;
-    shim.src = 'https://ga.jspm.io/npm:es-module-shims@2.8.4/dist/es-module-shims.js';
-    document.head.appendChild(shim);
-  }
-  function installMap(three, addons) {
-    var map = document.createElement('script');
-    map.type = needsShim ? 'importmap-shim' : 'importmap';
-    map.textContent = JSON.stringify({
-      imports: { three: three, 'three/addons/': addons }
-    });
-    document.head.appendChild(map);
-    var app = document.createElement('script');
-    app.type = needsShim ? 'module-shim' : 'module';
-    app.src = 'src/main.js?v=57';
-    document.body.appendChild(app);
-  }
+  var nativeMaps = !!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'));
+  function note(k,m){ if(window.MB_BOOT) MB_BOOT.add(k,m); }
   async function localThreeExists() {
-    try {
-      var head = await fetch(localThree, { method: 'HEAD' });
-      if (head.ok) return true;
-    } catch (e) {}
-    try {
-      var got = await fetch(localThree, { headers: { Range: 'bytes=0-0' } });
-      if (!(got.ok || got.status === 206)) return false;
-      await got.arrayBuffer();
-      return true;
-    } catch (e) {}
-    return false;
+    try { var head=await fetch(localThree,{method:'HEAD',cache:'no-store'}); if(head.ok)return true; } catch(e){ note('LOCAL THREE HEAD',e); }
+    try { var got=await fetch(localThree,{headers:{Range:'bytes=0-0'},cache:'no-store'}); return got.ok||got.status===206; } catch(e){ note('LOCAL THREE GET',e); return false; }
   }
-  (async function () {
-    if (await localThreeExists()) installMap(localThree, localAddons);
-    else installMap(cdnThree, cdnAddons);
+  function mapFor(three,addons,type){ var map=document.createElement('script'); map.type=type; map.textContent=JSON.stringify({imports:{three:three,'three/addons/':addons}}); document.head.appendChild(map); }
+  async function waitForShim(){ for(var i=0;i<100;i++){ if(typeof window.importShim==='function')return; await new Promise(function(r){setTimeout(r,50);}); } throw new Error('es-module-shims did not initialize within 5 seconds'); }
+  (async function(){
+    try {
+      var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
+      note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
+      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=58'); }
+      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); await window.importShim('./src/main.js?v=58'); }
+      if(window.MB_BOOT) MB_BOOT.ready();
+    } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
   })();
 })();
 </script>
