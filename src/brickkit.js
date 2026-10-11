@@ -20,7 +20,7 @@ const FLAT_SHADES = {
 };
 const WEATHER_SHADE = {
   clear: 'day', morning: 'day', noon: 'day',
-  evening: 'warm', quake: 'warm', meteor: 'warm', nuke: 'warm',
+  evening: 'warm', quake: 'warm', meteor: 'warm', nuke: 'storm',
   rain: 'storm', snow: 'storm', thunder: 'storm', tornado: 'storm', hurricane: 'storm', tsunami: 'storm',
   night: 'night',
 };

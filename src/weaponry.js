@@ -9,7 +9,10 @@ export const WEAPONS = [
   { id: 'mg',     name: 'Machine Gun',  icon: '🔫', dmg: 9,   radius: 0.4, maxBreak: 1, range: 34,  cd: 0.08, kind: 'gun' },
   { id: 'flame',  name: 'Flamethrower', icon: '🔥', dmg: 8,   radius: 1.4, maxBreak: 3, range: 7.5, cd: 0.1,  kind: 'stream', ignite: true },
   { id: 'rpg',    name: 'Shoulder RPG', icon: '🚀', dmg: 150, radius: 5.2, maxBreak: 6, range: 70,  cd: 1.8, kind: 'rocket', ignite: true },
-  { id: 'ufo',    name: 'UFO',          icon: '🛸', dmg: 0,   radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'ufo' }
+  { id: 'grenade', name: 'Frag Grenade', icon: '💣', dmg: 54, radius: 4.6, maxBreak: 4, range: 16, cd: 1.15, kind: 'grenade' },
+  { id: 'ufo',    name: 'UFO',          icon: '🛸', dmg: 0,   radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'ufo' },
+  { id: 'jack',   name: 'Jack-o-lantern', icon: '🎃', dmg: 0, radius: 0,   maxBreak: 0, range: 0,   cd: 2.5, kind: 'halloween' },
+  { id: 'flood',  name: 'Biblical Flood', icon: '🌊', dmg: 0, radius: 0, maxBreak: 0, range: 0, cd: 2.5, kind: 'flood' }
 ];
 
 /* -------------------------------------------------------------------- FX */
@@ -164,12 +167,65 @@ export function buildWeaponModels() {
   r.rotation.y = Math.PI; // tube muzzle faces -Z, not the shooter's back
   out.rpg = r;
 
+  const gr = new THREE.Group();
+  {
+    const body = new THREE.Mesh(BR, mkMat(0x3f6b32)); body.scale.set(0.22, 0.28, 0.22);
+    const band = new THREE.Mesh(BR, mkMat(0xc2b280)); band.scale.set(0.24, 0.06, 0.24); band.position.y = 0.04;
+    const pin = new THREE.Mesh(CY, dark); pin.scale.set(0.03, 0.16, 0.03); pin.position.y = 0.2;
+    const lever = new THREE.Mesh(BR, steel); lever.scale.set(0.04, 0.18, 0.06); lever.position.set(0.12, 0.08, 0);
+    gr.add(body, band, pin, lever);
+  }
+  out.grenade = gr;
+
   const u = makeSaucerMesh();
   u.scale.setScalar(0.42);
   out.ufo = u;
 
+  const jack = makePumpkinMesh();
+  jack.scale.setScalar(0.7);
+  out.jack = jack;
+
+  const flood = makeWaveMesh();
+  flood.scale.setScalar(0.85);
+  out.flood = flood;
+
   for (const grp of Object.values(out)) grp.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   return out;
+}
+
+export function makePumpkinMesh() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.46, 10, 8), mkMat(0xf27a12));
+  body.scale.set(1.08, 0.9, 1);
+  const stem = new THREE.Mesh(CY, mkMat(0x3d6b2a));
+  stem.scale.set(0.08, 0.2, 0.08);
+  stem.position.y = 0.42;
+  const face = mkMat(0x1a1208);
+  const eye = (x) => {
+    const m = new THREE.Mesh(BR, face);
+    m.scale.set(0.1, 0.1, 0.05);
+    m.position.set(x, 0.08, -0.42);
+    return m;
+  };
+  const mouth = new THREE.Mesh(BR, face);
+  mouth.scale.set(0.28, 0.08, 0.05);
+  mouth.position.set(0, -0.14, -0.42);
+  g.add(body, stem, eye(-0.16), eye(0.16), mouth);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
+}
+
+export function makeWaveMesh() {
+  const g = new THREE.Group();
+  const water = new THREE.Mesh(BR, mkMat(0x1a6fbe, { transparent: true, opacity: 0.85 }));
+  water.scale.set(0.72, 0.14, 0.5);
+  const crest = new THREE.Mesh(BR, mkMat(0xd7f3ff));
+  crest.scale.set(0.34, 0.1, 0.16);
+  crest.position.set(0.08, 0.12, -0.02);
+  crest.rotation.z = 0.45;
+  g.add(water, crest);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
 }
 
 export function makeSaucerMesh() {

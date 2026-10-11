@@ -1333,6 +1333,7 @@ function legoFig(mat, cloth, skin, opts = {}) {
   if (opts.beard) g.add(merged([addBox([], 0.2, 0.09, 0.06, 0, 0.5, -0.11)], mat(opts.beard)));
   if (opts.collar) g.add(merged([addBox([], 0.28, 0.06, 0.22, 0, 0.47, 0)], mat(0xffffff)));
   g.userData.parts = { armL, armR, legL: g.children[0], legR, torso, head };
+  g.userData.inhabitant = true;
   return g;
 }
 

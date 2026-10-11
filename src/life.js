@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { BR, SP, CY, mkMat, clamp } from './brickkit.js';
 import { rayAabb } from './weaponry.js';
+import { sfx } from './sfx.js';
 
 /* People and animals can be killed. Vehicles and balloons are not.
    h/r/w/d are the unscaled mesh size; _spawn scales people to the player
@@ -54,6 +55,7 @@ export function legoGuy(rand, opts = {}) {
   box(g, mkMat(0x22252b), 0.045, 0.045, 0.03, 0.06, 0.59, -0.106);
   g.userData.legs = g.children.slice(0, 2);
   g.userData.arms = [armL, armR];
+  g.userData.inhabitant = true;
   return finish(g);
 }
 
@@ -377,6 +379,112 @@ export class Life {
     return this.counts();
   }
 
+  /* Turn every person figure already in the world, then the animals. No new creatures. */
+  hauntPeople(extraRoots = []) {
+    const people = ['zombie', 'ghost', 'skeleton'];
+    const animals = ['bat', 'snake'];
+    let pi = 0, ai = 0, n = 0;
+    const turn = (group) => {
+      if (!group || group.userData.monster) return false;
+      this.paintMonster(group, people[pi++ % people.length]);
+      return true;
+    };
+    const riders = (root) => {
+      if (!root) return;
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant && turn(o)) n++;
+      });
+    };
+    for (const c of this.creatures) {
+      if (!c.alive) continue;
+      if (c.kind === 'person') {
+        if (turn(c.mesh)) { c.monster = c.mesh.userData.monster; n++; }
+      } else if (c.hp != null && !c.monster) {
+        this.becomeCritter(c, animals[ai++ % animals.length]);
+        n++;
+      }
+      riders(c.mesh);
+    }
+    for (const root of extraRoots) riders(root);
+    return n;
+  }
+
+  /* Recolor every brick of this one figure, including hats and nested arms. */
+  paintMonster(group, form) {
+    const meshes = [];
+    const walk = (node) => {
+      for (const ch of node.children) {
+        if (ch.userData && ch.userData.inhabitant) continue;
+        if (ch.isMesh) meshes.push(ch);
+        if (ch.children && ch.children.length) walk(ch);
+      }
+    };
+    walk(group);
+    const paint = (m, hex, extra) => { m.material = mkMat(hex, extra); };
+    if (form === 'ghost') {
+      const ghost = { transparent: true, opacity: 0.45, depthWrite: false };
+      meshes.forEach((m) => paint(m, 0xe7fbff, ghost));
+    } else if (form === 'zombie') {
+      meshes.forEach((m) => paint(m, 0x5f8f46));
+      meshes.filter((m) => m.scale.x < 0.08 && m.scale.y < 0.08).forEach((m) => paint(m, 0xc41616));
+    } else {
+      meshes.forEach((m) => paint(m, 0xe4dccb));
+      meshes.filter((m) => m.scale.x < 0.08 && m.scale.y < 0.08).forEach((m) => paint(m, 0x161616));
+    }
+    group.userData.monster = form;
+  }
+
+  /* Swap an animal's bricks for a bat or a snake, on the same creature. */
+  becomeCritter(c, form) {
+    const g = c.mesh;
+    const shared = new Set([BR, CY, SP]);
+    for (let i = g.children.length - 1; i >= 0; i--) {
+      const ch = g.children[i];
+      g.remove(ch);
+      ch.traverse((o) => {
+        if (!o.isMesh) return;
+        if (o.material) o.material.dispose();
+        if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
+      });
+    }
+    g.userData.legs = null;
+    g.userData.arms = null;
+    g.userData.tail = null;
+    g.userData.wings = null;
+    g.userData.segs = null;
+    if (form === 'bat') this.fillBat(g);
+    else this.fillSnake(g);
+    g.scale.setScalar(1.15);
+    c.monster = form;
+  }
+
+  fillBat(g) {
+    const body = mkMat(0x2c2640);
+    const wing = mkMat(0x4a3d66);
+    box(g, body, 0.18, 0.14, 0.32, 0, 0.22, 0);
+    box(g, body, 0.14, 0.12, 0.14, 0, 0.32, -0.18);
+    box(g, body, 0.04, 0.1, 0.04, -0.05, 0.42, -0.16);
+    box(g, body, 0.04, 0.1, 0.04, 0.05, 0.42, -0.16);
+    box(g, mkMat(0xc41616), 0.04, 0.04, 0.03, -0.04, 0.34, -0.25);
+    box(g, mkMat(0xc41616), 0.04, 0.04, 0.03, 0.04, 0.34, -0.25);
+    const wl = box(g, wing, 0.62, 0.04, 0.28, -0.4, 0.26, 0);
+    const wr = box(g, wing, 0.62, 0.04, 0.28, 0.4, 0.26, 0);
+    g.userData.wings = [wl, wr];
+  }
+
+  fillSnake(g) {
+    const hide = mkMat(0x2f8a3a);
+    const band = mkMat(0xd6e07a);
+    const segs = [];
+    for (let i = 0; i < 7; i++) {
+      segs.push(box(g, i % 2 ? band : hide, 0.14, 0.12, 0.18, 0, 0.08, -0.55 + i * 0.17));
+    }
+    box(g, hide, 0.16, 0.14, 0.18, 0, 0.1, -0.72);
+    box(g, mkMat(0x111111), 0.035, 0.035, 0.03, -0.04, 0.14, -0.82);
+    box(g, mkMat(0x111111), 0.035, 0.035, 0.03, 0.04, 0.14, -0.82);
+    g.userData.segs = segs;
+  }
+
   killNear(x, z, r) {
     let n = 0;
     for (const c of this.creatures) {
@@ -403,7 +511,10 @@ export class Life {
     c.alive = false;
     c.hp = 0;
     c.mesh.visible = false;
-    if (VITALS[c.kind]) this.markPuddle(c);
+    if (VITALS[c.kind]) {
+      this.markPuddle(c);
+      sfx.scream();
+    }
   }
 
   /* Creatures standing in a forward arc (melee and flamethrower). */
@@ -496,12 +607,67 @@ export class Life {
     mesh.instanceMatrix.needsUpdate = true;
   }
 
+  /* Inhabitants and animals tread the flood. Feet sink, head stays above the surface. */
+  swim(c, dt) {
+    const w = this.world;
+    const m = c.mesh;
+    const dx = c.tx - m.position.x, dz = c.tz - m.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 0.7) {
+      c.walk = 0;
+      if (c.t - c.reachedAt > 1.2 + wrand(c) * 2) {
+        c.reachedAt = c.t;
+        const a = Math.random() * Math.PI * 2;
+        const r = 2 + Math.random() * Math.max(3, c.homeR);
+        c.tx = clamp(c.home.x + Math.cos(a) * r, -w.half + 3, w.half - 3);
+        c.tz = clamp(c.home.z + Math.sin(a) * r, -w.half + 3, w.half - 3);
+      }
+    } else {
+      const step = Math.min(dist, 1.55 * dt);
+      m.position.x += (dx / dist) * step;
+      m.position.z += (dz / dist) * step;
+      c.yaw = Math.atan2(-dx, -dz);
+      c.walk += dt;
+    }
+    m.rotation.y = c.yaw;
+    m.rotation.x = 0.4;
+    const h = c.kind === 'person' ? 2.13 : 1.05;
+    const bob = Math.sin(c.t * 2.4 + c.yaw) * 0.07;
+    const floatY = w.floodY - h * 0.5 + bob;
+    const gy = this.ground(m.position.x, m.position.z);
+    const floor = Math.max(gy, floatY);
+    m.position.y += (floor - m.position.y) * Math.min(1, dt * 2.4);
+    const sw = Math.sin(c.t * 6) * 0.7;
+    if (m.userData.arms) {
+      m.userData.arms[0].rotation.x = -1.1 + sw;
+      m.userData.arms[1].rotation.x = -1.1 - sw;
+    }
+    if (m.userData.legs && m.userData.legs.length) {
+      m.userData.legs[0].rotation.x = sw * 0.45;
+      if (m.userData.legs[1]) m.userData.legs[1].rotation.x = -sw * 0.45;
+    }
+    if (m.userData.wings) {
+      m.userData.wings[0].rotation.z = sw;
+      m.userData.wings[1].rotation.z = -sw;
+    }
+    if (c.monster === 'snake' && m.userData.segs) {
+      m.userData.segs.forEach((seg, i) => {
+        seg.position.x = Math.sin(c.t * 8 - i * 0.65) * 0.07;
+      });
+    }
+  }
+
   update(dt) {
     const w = this.world;
     for (const c of this.creatures) {
       if (!c.alive || c.abduct) continue;
       c.t += dt;
       const m = c.mesh;
+
+      if (w.floodY != null && c.hp != null) {
+        this.swim(c, dt);
+        continue;
+      }
 
       if (c.kind === 'balloon') {
         const a = c.t * 0.03 + c.yaw, R = c.homeR;
@@ -511,7 +677,21 @@ export class Life {
         m.rotation.y = -a;
         continue;
       }
-      if (c.kind === 'bird') {
+      if (c.monster === 'bat') {
+        const a = c.t * 0.7 + c.yaw;
+        const R = Math.max(4, c.homeR * 0.55);
+        m.position.x = c.home.x + Math.cos(a) * R;
+        m.position.z = c.home.z + Math.sin(a) * R;
+        m.position.y = this.ground(m.position.x, m.position.z) + 2.4 + Math.sin(c.t * 3) * 0.55;
+        m.rotation.y = -a;
+        const flap = Math.sin(c.t * 16) * 0.7;
+        if (m.userData.wings) {
+          m.userData.wings[0].rotation.z = flap;
+          m.userData.wings[1].rotation.z = -flap;
+        }
+        continue;
+      }
+      if (c.kind === 'bird' && !c.monster) {
         const a = c.t * 0.45 + c.yaw, R = Math.max(6, c.homeR * 0.7);
         m.position.x = c.home.x + Math.cos(a) * R;
         m.position.z = c.home.z + Math.sin(a) * R;
@@ -622,7 +802,10 @@ export class Life {
           c.tz = clamp(c.home.z + Math.sin(a) * r, -w.half + 3, w.half - 3);
         }
       } else {
-        const sp = c.kind === 'cow' ? 1.0 : c.kind === 'chicken' ? 1.6 : 1.9;
+        const sp = c.monster === 'zombie' ? 0.8
+          : c.monster === 'skeleton' ? 1.35
+          : c.monster === 'snake' ? 1.45
+          : c.kind === 'cow' ? 1.0 : c.kind === 'chicken' ? 1.6 : 1.9;
         const step = Math.min(dist, sp * dt);
         m.position.x += (dx / dist) * step;
         m.position.z += (dz / dist) * step;
@@ -630,8 +813,10 @@ export class Life {
         c.walk += dt;
       }
       m.rotation.y = c.yaw;
+      m.rotation.x = 0;
       const gy = this.ground(m.position.x, m.position.z);
-      m.position.y += (gy - m.position.y) * Math.min(1, dt * 9);
+      const hover = c.monster === 'ghost' ? 1.2 + Math.sin(c.t * 2.2) * 0.28 : 0;
+      m.position.y += (gy + hover - m.position.y) * Math.min(1, dt * 9);
       const sw = Math.sin(c.walk * 7) * (c.walk > 0.05 ? 0.45 : 0.03);
       if (m.userData.legs) {
         m.userData.legs[0].rotation.x = sw;
@@ -642,6 +827,12 @@ export class Life {
         m.userData.arms[1].rotation.x = sw;
       }
       if (m.userData.tail) m.userData.tail.rotation.y = Math.sin(c.t * 3.2) * 0.45;
+      if (c.monster === 'snake' && m.userData.segs) {
+        m.userData.segs.forEach((seg, i) => {
+          seg.position.x = Math.sin(c.t * 8 - i * 0.65) * 0.07;
+        });
+        m.rotation.z = Math.sin(c.t * 8) * 0.12;
+      }
     }
   }
 }

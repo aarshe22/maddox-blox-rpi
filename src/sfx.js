@@ -62,6 +62,19 @@ class Sfx {
   crack()    { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.12, 0.35, 2600, 900, 'highpass'); } }
   thud()     { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.2, 0.5, 'sine', 90, 40); this._noise(t, 0.15, 0.3, 800, 150); } }
   hurt()     { if (this.ensure()) { const t = this.ac.currentTime; this._tone(t, 0.18, 0.32, 'square', 440, 130); } }
+  /* Electronic scream: a saw vowel that falls, with a square overtone and a tight band of noise. */
+  scream() {
+    if (!this.ensure()) return;
+    const t = this.ac.currentTime;
+    const f = 680 + Math.random() * 340;
+    this._tone(t, 0.46, 0.32, 'sawtooth', f, Math.max(90, f * 0.22));
+    this._tone(t, 0.4, 0.14, 'square', f * 1.5, Math.max(80, f * 0.28));
+    this._noise(t, 0.34, 0.1, Math.min(6000, f * 2.4), 380, 'bandpass', 7);
+    this._tone(t + 0.09, 0.05, 0.1, 'square', f * 1.7, f * 0.55);
+    this._tone(t + 0.18, 0.05, 0.08, 'square', f * 1.15, f * 0.4);
+  }
+  toss()     { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.16, 0.22, 900, 2200, 'bandpass', 1.2); this._tone(t, 0.1, 0.12, 'square', 240, 480); } }
+  bang()     { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.32, 0.55, 1600, 80); this._tone(t, 0.22, 0.4, 'sine', 170, 42); } }
   destroy()  { if (this.ensure()) { const t = this.ac.currentTime; this._noise(t, 0.6, 0.8, 1800, 120); this._tone(t, 0.35, 0.6, 'sine', 150, 45); } }
   thunder()  { if (this.ensure()) { const t = this.ac.currentTime;
     this._noise(t, 1.6, 0.85, 900, 40); this._tone(t, 1.2, 0.7, 'sine', 70, 28); this._noise(t + 0.12, 0.8, 0.5, 300, 60); } }

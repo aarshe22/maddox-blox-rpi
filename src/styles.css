@@ -173,7 +173,7 @@ body.touch #panel-hint { display: none; }
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
-  color: #eef3fa;
+  color: #000;
   white-space: nowrap;
 }
 #stripbar.labeled .weather-w {
@@ -436,14 +436,20 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
   min-width: 0;
   height: clamp(84px, 18vh, 140px);
   border-radius: 12px;
-  padding: 4px 2px;
+  padding: 4px 2px 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
 }
 #stripbar .slot .wicon {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   font-size: 0;
   line-height: 0;
 }
@@ -456,10 +462,18 @@ body.touch #btn-options { top: 10px; right: 10px; width: 60px; height: 60px; fon
 #stripbar .wlabel,
 #stripbar.labeled .weather-w .wlabel {
   display: block;
+  color: #000;
   font-size: clamp(10px, 1.15vw, 15px);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+#flash-wash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  opacity: 0;
 }
 #stripbar .slot .key {
   font-size: 14px;

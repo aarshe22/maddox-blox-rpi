@@ -44,6 +44,7 @@ export class Train {
     b(mkMat(shirt), 0.32, 0.28, 0.2, 0, 0.36, 0);
     b(skin, 0.24, 0.2, 0.2, 0, 0.6, 0);
     b(mkMat(0xdc1414), 0.26, 0.06, 0.24, 0, 0.72, 0);
+    g.userData.inhabitant = true;
     return g;
   }
 

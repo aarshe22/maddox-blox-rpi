@@ -37,7 +37,7 @@ export const SKY = {
   hurricane:{ bg: 0x46586a, fog: 0x5a6d7e, sun: 0.55, sunCol: 0xaebfd0, hemi: 0.45, star: false },
   tsunami:  { bg: 0x33465c, fog: 0x44586e, sun: 0.7, sunCol: 0xbcd2e8, hemi: 0.55, star: false },
   meteor:   { bg: 0x511f1f, fog: 0x6b3030, sun: 1.1, sunCol: 0xff8a5c, hemi: 0.6, star: false },
-  nuke:     { bg: 0x6b5a3c, fog: 0x8a7454, sun: 1.5, sunCol: 0xffd9a0, hemi: 0.75, star: false }
+  nuke:     { bg: 0x8d949b, fog: 0xb7bec6, sun: 0.55, sunCol: 0xd5dbe2, hemi: 0.45, star: false }
 };
 
 /* Particle curtain (rain/hurricane) or drift (snow): points recycled inside a
