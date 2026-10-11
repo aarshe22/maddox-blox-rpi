@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Maddox Blox">
   <title>Maddox Blox</title>
 <link rel="stylesheet" href="src/styles.css?v=18" />
-<script async src="https://ga.jspm.io/npm:es-module-shims@2.8.4/dist/es-module-shims.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.8.2/dist/es-module-shims.js"></script>
 <script>
 try {
   if (matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0)
@@ -82,7 +82,7 @@ try {
   var panel = document.getElementById("bootstrap-panel");
   var log = document.getElementById("bootstrap-log");
   var status = document.getElementById("bootstrap-status");
-  function describe(v) { try { return v && v.stack ? v.stack : String(v); } catch (_) { return "[unprintable]"; } }
+  function describe(v) { try { if (v && typeof v === "object") return (v.name || "Error") + ": " + (v.message || String(v)) + (v.stack ? "\n" + v.stack : "") + (v.url ? "\nURL: " + v.url : ""); return String(v); } catch (_) { return "[unprintable]"; } }
   function add(kind, msg) {
     var line = new Date().toISOString() + " [" + kind + "] " + describe(msg);
     lines.push(line); if (lines.length > 100) lines.shift();
@@ -95,8 +95,9 @@ try {
   }
   window.MB_BOOT = { add:add, fail:function(e){ add("FATAL",e); status.textContent="Game startup failed — diagnostics captured below."; panel.hidden=false; }, ready:function(){ add("READY","Game module started"); status.textContent="Game module started."; }, dump:snapshot };
   add("BOOT","Bootstrap UI loaded");
-  window.addEventListener("error",function(e){ add("ERROR",(e.message||"error")+" @ "+(e.filename||"")+" :"+(e.lineno||0)+":"+(e.colno||0)); if(e.error)add("STACK",e.error); });
+  window.addEventListener("error",function(e){ add("ERROR",(e.message||"error")+" @ "+(e.filename||"")+" :"+(e.lineno||0)+":"+(e.colno||0)); if(e.error)add("STACK",e.error); if(e.target && e.target !== window && e.target.src)add("RESOURCE",e.target.src); });
   window.addEventListener("unhandledrejection",function(e){ add("REJECTION",e.reason); });
+  window.addEventListener("error",function(e){ var t=e.target; if(t && t!==window && (t.src||t.href)) add("RESOURCE FAILED",t.src||t.href); },true);
   document.getElementById("bootstrap-options").onclick=function(){ panel.hidden=false; };
   document.getElementById("bootstrap-close").onclick=function(){ panel.hidden=true; };
   document.getElementById("bootstrap-reload").onclick=function(){ location.reload(); };
@@ -182,7 +183,7 @@ try {
 </div>
 
 <script>
-/* Safari 15 interim loader: es-module-shims is declared in <head>; wait for importShim before starting. */
+/* Safari 15 interim loader: pinned 1.8.2 polyfill, import map installed before shimmed game startup. */
 (function () {
   if (location.protocol === 'file:') return;
   var localThree = './node_modules/three/build/three.module.js';
@@ -201,8 +202,8 @@ try {
     try {
       var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
       note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
-      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=58'); }
-      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); await window.importShim('./src/main.js?v=58'); }
+      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=59'); }
+      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); await window.importShim('./src/main.js?v=59'); }
       if(window.MB_BOOT) MB_BOOT.ready();
     } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
   })();
