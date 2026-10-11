@@ -12,6 +12,11 @@ import { Train } from './train.js';
 import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js?v=1';
 import { sigOf, getState, setState, clearState } from './persist.js';
 
+const BOOT = window.MB_BOOT;
+function bootStep(msg) { if (BOOT) BOOT.add('GAME', msg); }
+function bootFail(err) { if (BOOT) BOOT.fail(err); }
+bootStep('main.js module body entered; THREE revision=' + (THREE.REVISION || 'unknown'));
+
 try {
   const here = new URL(location.href);
   if (here.searchParams.has('nocache')) {
@@ -2983,10 +2988,14 @@ class Player {
 
 class Game {
   constructor() {
+    bootStep('Game constructor entered');
     this.canvas = document.getElementById('scene');
+    bootStep('scene canvas found=' + !!this.canvas);
     // Drawing size comes from the resolution option. Low (640x360) is the default
     // so a Pi 4 stays responsive; CSS stretches that buffer to the screen.
+    bootStep('creating THREE.WebGLRenderer');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
+    bootStep('WebGLRenderer created; WebGL2=' + !!(this.renderer.capabilities && this.renderer.capabilities.isWebGL2));
     this.renderer.setPixelRatio(1);
     this.renderer.shadowMap.enabled = false;
 
@@ -2995,7 +3004,9 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1800);
     this.orbit = { yaw: Math.PI, pitch: 0.42, dist: 11, wantDist: 11 };
 
+    bootStep('creating World');
     this.world = new World(this.scene);
+    bootStep('World created');
     this.world.onWorldChanged = () => {
       this.applyOutdoorFog();
       if (this.life) {
@@ -7130,6 +7141,7 @@ class Game {
       this.camera.position.z += (Math.random() * 2 - 1) * s;
     }
     this.renderer.render(this.scene, this.camera);
+    if (!this._bootRendered) { this._bootRendered = true; bootStep('FIRST FRAME RENDERED'); if (BOOT && BOOT.rendered) BOOT.rendered(); }
   }
 
   tickWeaponRig(dt) {
@@ -7150,7 +7162,15 @@ window.addEventListener('error', (e) => {
   if (t) { t.textContent = 'Error: ' + e.message; t.className = 'show bad'; }
 });
 
-const game = new Game();
-window.GAME = game;
-game.debugBricks = BRICKS; // exposed for smoke tests
+bootStep('constructing Game singleton');
+let game;
+try {
+  game = new Game();
+  window.GAME = game;
+  game.debugBricks = BRICKS; // exposed for smoke tests
+  bootStep('Game singleton constructed');
+} catch (e) {
+  bootFail(e);
+  throw e;
+}
 
