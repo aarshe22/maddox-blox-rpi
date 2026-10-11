@@ -2950,6 +2950,8 @@ class Game {
     this.flashT = 0;
     this.tornadoPos = new THREE.Vector3(0, 0, 0);
     this.tornadoTgt = new THREE.Vector3(0, 0, 0);
+    this.tornadoLeaving = false;
+    this.tornadoLift = 0;
     this.waveZ = 0;
     this.waveId = 0;
     this.rain = new ParticleField(this.scene, 650, 0xbcd6ea, 0.32);
@@ -3272,7 +3274,7 @@ class Game {
       this.toast('Weapons — stick moves, A selects, X keeps it', 'good');
     }
     else if (mode === 'explore') {
-      const held = this.equipped == null ? '' : ` ${WEAPONS[this.equipped].name} ready — A fires.`;
+      const held = this.equipped == null ? '' : ` ${WEAPONS[this.equipped].name} ready — A or F fires.`;
       this.toast('Explore mode.' + held, 'good');
     }
     this.refreshStrips();
@@ -3281,6 +3283,11 @@ class Game {
 
 
   onWeatherClick(id) {
+    if (id === 'tornado' && this.weather === 'tornado' && !this.tornadoLeaving) {
+      this.dismissTornado();
+      this.refreshStrips();
+      return;
+    }
     const enter = this.mode !== 'weather';
     if (enter) this.setMode('weather');
     this.activateWeather(id);
@@ -3321,7 +3328,8 @@ class Game {
       el.style.display = weapon ? '' : 'none';
       const godzillaTile = WEAPONS[i] && WEAPONS[i].kind === 'godzilla' && giantOn;
       const hairTile = WEAPONS[i] && WEAPONS[i].kind === 'hair' && !!this.hair;
-      el.classList.toggle('active', weapon && (i + 1 === weaponFocus || godzillaTile || hairTile));
+      const ufoTile = WEAPONS[i] && WEAPONS[i].kind === 'ufo' && !!this.saucer;
+      el.classList.toggle('active', weapon && (i + 1 === weaponFocus || godzillaTile || hairTile || ufoTile));
     });
     const weatherFocus = weather
       ? (this.stripFocus ?? (Math.max(0, WEATHERS.findIndex((w) => w.id === this.weather)) + 1))
@@ -3354,7 +3362,7 @@ class Game {
     this.confirmWeapon(clamp(i, 0, WEAPONS.length - 1) + 1);
   }
 
-  /* Strip index 0 is the empty tile. UFO launches but is never kept. */
+  /* Strip index 0 is the empty tile. UFO stays highlighted while the saucer is out. */
   toggleGodzilla() {
     if (!this.player || this.bonus) return;
     const on = !this.player.giant;
@@ -3833,9 +3841,8 @@ class Game {
     }
     if (this.player.flying) this.stopFlight();
     if (def.kind === 'ufo' || def.kind === 'halloween' || def.kind === 'flood' || def.kind === 'water' || def.kind === 'frost' || def.kind === 'hair') {
-      if (def.kind === 'ufo') {
-        if (!this.saucer) this.launchSaucer();
-      } else if (def.kind === 'halloween') this.unleashHalloween();
+      if (def.kind === 'ufo') this.toggleSaucer();
+      else if (def.kind === 'halloween') this.unleashHalloween();
       else if (def.kind === 'flood') this.startFlood();
       else if (def.kind === 'water') this.unleashWater();
       else if (def.kind === 'hair') this.unleashHair();
@@ -3920,6 +3927,9 @@ class Game {
     const def = WEATHERS.find((w) => w.id === id) || WEATHERS[0];
     voice.speak(def.name);
     this.weather = def.id;
+    this.tornadoLeaving = false;
+    this.tornadoLift = 0;
+    if (this.funnel && this.funnel.rings[0]) this.funnel.rings[0].material.opacity = 0.55;
     const fi = WEATHERS.findIndex((w) => w.id === def.id);
     if (fi >= 0) this.stripFocus = fi + 1;
     this.weatherDef = def;
@@ -3952,7 +3962,9 @@ class Game {
         this.armStorm(); break;
       case 'tornado': sfx.loop('tornado', { type: 'lowpass', f: 260, q: 0.9, gain: 0.34, lfo: 0.18, lfoDepth: 90 });
         this.funnel.show(true);
-        this.tornadoPos.set(p.x + 22, 0, p.z + 22); this.tornadoTgt.copy(this.tornadoPos); break;
+        this.tornadoPos.set(p.x + 22, 0, p.z + 22); this.tornadoTgt.copy(this.tornadoPos);
+        this.funnel.group.position.set(this.tornadoPos.x, 0, this.tornadoPos.z);
+        break;
       case 'hurricane': sfx.loop('hurricane', { type: 'lowpass', f: 520, q: 0.8, gain: 0.4, lfo: 0.5, lfoDepth: 320 });
         sfx.loop('debris', { type: 'bandpass', f: 2400, q: 1.4, gain: 0.1, lfo: 3.2, lfoDepth: 900 });
         this.funnel.show(true);
@@ -4508,7 +4520,7 @@ class Game {
     const aim = fwd.clone();
 
     if (def.kind === 'ufo') {
-      if (!this.saucer) this.launchSaucer();
+      this.toggleSaucer();
       this._swing(0.4);
       return true;
     }
@@ -5297,6 +5309,32 @@ class Game {
     sfx.meteorWhistle();
   }
 
+  /* Tornado stays until it is chosen again. That click sends it off; the next one starts a new run. */
+  dismissTornado() {
+    if (this.weather !== 'tornado' || this.tornadoLeaving) return;
+    this.tornadoLeaving = true;
+    this.tornadoLift = 0;
+    sfx.unloop('tornado');
+    this.toast('The tornado lifts off and leaves', 'good');
+  }
+
+  finishTornado() {
+    this.tornadoLeaving = false;
+    this.tornadoLift = 0;
+    if (this.funnel) {
+      this.funnel.show(false);
+      if (this.funnel.rings[0]) this.funnel.rings[0].material.opacity = 0.55;
+    }
+    sfx.unloop('tornado');
+    if (this.weather !== 'tornado') return;
+    this.weather = 'clear';
+    this.weatherDef = WEATHERS[0];
+    this.weatherT = 0;
+    this.stripFocus = 1;
+    this.applyOutdoorFog();
+    if (this.refreshStrips) this.refreshStrips();
+  }
+
   updateWeather(dt) {
     const def = this.weatherDef;
     const p = this.player.pos;
@@ -5345,26 +5383,34 @@ class Game {
 
     // mover: tornado / hurricane funnel roams and smashes props
     if (def.mover) {
-      if (this.weatherT > 2.5) {
-        this.weatherT = 0;
-        const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 18;
-        this.tornadoTgt.set(
-          clamp(p.x + Math.cos(a) * r, -this.world.half + 4, this.world.half - 4),
-          0,
-          clamp(p.z + Math.sin(a) * r, -this.world.half + 4, this.world.half - 4));
-      }
-      const speed = def.id === 'hurricane' ? 10 : 7;
-      const d = this.tornadoTgt.clone().sub(this.tornadoPos); d.y = 0;
-      if (d.length() > 0.5) this.tornadoPos.addScaledVector(d.normalize(), Math.min(speed * dt, d.length()));
-      this.funnel.update(dt, this.tornadoPos.x, 0, this.tornadoPos.z, def.id === 'hurricane' ? 2 : 1);
-      this.weatherDmgT += dt;
-      if (this.weatherDmgT >= def.every) {
-        this.weatherDmgT = 0;
-        for (const pr of this.world.props) {
-          if (pr.gone) continue;
-          if (Math.hypot(pr.cx - this.tornadoPos.x, pr.cz - this.tornadoPos.z) > def.radius + 2) continue;
-          const pt = this.world.hitPoint(pr, this.tornadoPos.clone().setY(2));
-          this.applyWeatherHit(pr, def.dmg, pt);
+      if (def.id === 'tornado' && this.tornadoLeaving) {
+        this.tornadoLift += dt * 18;
+        this.funnel.update(dt, this.tornadoPos.x, this.tornadoLift, this.tornadoPos.z, 1.8);
+        const mat = this.funnel.rings[0].material;
+        mat.opacity = Math.max(0, 0.55 * (1 - this.tornadoLift / 36));
+        if (this.tornadoLift > 36) this.finishTornado();
+      } else {
+        if (this.weatherT > 2.5) {
+          this.weatherT = 0;
+          const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 18;
+          this.tornadoTgt.set(
+            clamp(p.x + Math.cos(a) * r, -this.world.half + 4, this.world.half - 4),
+            0,
+            clamp(p.z + Math.sin(a) * r, -this.world.half + 4, this.world.half - 4));
+        }
+        const speed = def.id === 'hurricane' ? 10 : 7;
+        const d = this.tornadoTgt.clone().sub(this.tornadoPos); d.y = 0;
+        if (d.length() > 0.5) this.tornadoPos.addScaledVector(d.normalize(), Math.min(speed * dt, d.length()));
+        this.funnel.update(dt, this.tornadoPos.x, 0, this.tornadoPos.z, def.id === 'hurricane' ? 2 : 1);
+        this.weatherDmgT += dt;
+        if (this.weatherDmgT >= def.every) {
+          this.weatherDmgT = 0;
+          for (const pr of this.world.props) {
+            if (pr.gone) continue;
+            if (Math.hypot(pr.cx - this.tornadoPos.x, pr.cz - this.tornadoPos.z) > def.radius + 2) continue;
+            const pt = this.world.hitPoint(pr, this.tornadoPos.clone().setY(2));
+            this.applyWeatherHit(pr, def.dmg, pt);
+          }
         }
       }
     }
@@ -5390,6 +5436,16 @@ class Game {
     }
   }
 
+  /* First click starts a run. The next sends it off. The one after that starts again. */
+  toggleSaucer() {
+    if (this.saucer && !this.saucer.leaving) {
+      this.dismissSaucer();
+      return;
+    }
+    if (this.saucer) this.clearSaucer();
+    this.launchSaucer();
+  }
+
   launchSaucer() {
     const mesh = makeSaucerMesh();
     mesh.scale.setScalar(4.4);
@@ -5403,9 +5459,21 @@ class Game {
     beam.receiveShadow = false;
     this.scene.add(mesh);
     this.scene.add(beam);
-    this.saucer = { mesh, beam, t: 0 };
+    this.saucer = { mesh, beam, t: 0, leaving: false };
     sfx.launch();
     this.toast('Saucer inbound — it beams up people and animals', 'good');
+  }
+
+  dismissSaucer() {
+    const s = this.saucer;
+    if (!s || s.leaving) return;
+    s.leaving = true;
+    if (this.life) {
+      for (const c of this.life.creatures) {
+        if (c.abduct && c.alive) c.abduct = false;
+      }
+    }
+    this.toast('The saucer breaks off and leaves', 'good');
   }
 
   clearSaucer() {
@@ -5414,12 +5482,24 @@ class Game {
     this.scene.remove(s.mesh);
     this.scene.remove(s.beam);
     this.saucer = null;
+    if (this.refreshStrips) this.refreshStrips();
   }
 
   updateSaucer(dt) {
     const s = this.saucer;
     if (!s) return;
     s.t += dt;
+    if (s.leaving) {
+      s.mesh.position.y += dt * 14;
+      s.mesh.rotation.y += dt * 1.4;
+      const gy = 0.15;
+      const h = Math.max(0.4, s.mesh.position.y - gy);
+      s.beam.scale.set(1, h, 1);
+      s.beam.position.set(s.mesh.position.x, gy + h / 2, s.mesh.position.z);
+      s.beam.material.opacity *= 0.9;
+      if (s.mesh.position.y > 55) this.clearSaucer();
+      return;
+    }
     const hover = 16;
     s.mesh.position.y += (hover - s.mesh.position.y) * Math.min(1, dt * 0.7);
     s.mesh.rotation.y += dt * 0.8;
@@ -5457,11 +5537,7 @@ class Game {
         }
       }
     }
-    if (left === 0 && s.t > 1.2) {
-      s.mesh.position.y += dt * 14;
-      s.beam.material.opacity *= 0.9;
-      if (s.mesh.position.y > 55) this.clearSaucer();
-    }
+    if (left === 0 && s.t > 1.2) s.leaving = true;
   }
 
   /* One 1x1 builder brick. Reused so a machine gun does not allocate every shot. */
@@ -5983,6 +6059,7 @@ class Game {
 
   bindInput() {
     this.keys = new Set();
+    this.keyFire = false;
     const map = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
     window.addEventListener('keydown', (e) => {
       if (this.panel?.isOpen) {
@@ -6015,6 +6092,7 @@ class Game {
       }
       if (map[e.code]) { this.keys.add(map[e.code]); e.preventDefault(); return; }
       if (e.code === 'KeyX' && this.mode === 'build') { this.selectSlot(BRICKS.length); return; }
+      if (e.code === 'KeyF') { e.preventDefault(); this.keyFire = true; return; }
       const n = parseInt(e.key, 10);
       if (Number.isNaN(n)) return;
       if (this.mode === 'weapon') {
@@ -6025,8 +6103,11 @@ class Game {
         if (n >= 1 && n <= BRICKS.length) this.selectSlot(n - 1);
       }
     });
-    window.addEventListener('keyup', (e) => { if (map[e.code]) this.keys.delete(map[e.code]); });
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      if (map[e.code]) this.keys.delete(map[e.code]);
+      if (e.code === 'KeyF') this.keyFire = false;
+    });
+    window.addEventListener('blur', () => { this.keys.clear(); this.keyFire = false; });
     window.addEventListener('resize', () => { this.resize(); this.layoutStrips?.(); });
     if (document.documentElement.classList.contains('touch')
       || matchMedia('(hover: none), (pointer: coarse)').matches
@@ -6741,7 +6822,7 @@ class Game {
     DBG.sample();
     this.fireCd = Math.max(0, this.fireCd - dt);
     this.tickWeaponRig(dt);
-    const firing = this.mode === 'explore' && this.padFire;
+    const firing = this.padFire || (this.keyFire && this.mode === 'explore' && !!this.armedWeapon() && !this.world.inHouse);
     if (firing) this.tryFire({ x: 0, y: 0 });
     sfx.setFlame(firing && this.armedWeapon()?.kind === 'stream');
     this.updateSaucer(dt);
