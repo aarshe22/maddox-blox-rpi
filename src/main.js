@@ -4866,7 +4866,7 @@ class Game {
     return hosts;
   }
 
-  /* One beard shape on the inhabitant. Later stages only stretch that shape. */
+  /* Chin beard on the figure. The growing length is a trail of bricks that follows their steps. */
   poseHair(host, stage) {
     let box = host.userData.hairBox;
     if (!box) {
@@ -4876,26 +4876,33 @@ class Game {
     }
     const h = box.max.y - box.min.y;
     if (h < 0.02) return false;
-    const voxel = Math.max(0.08, h * 0.22);
-    const mouthY = box.min.y + h * 0.64;
+    const thick = Math.max(0.08, h * 0.16);
+    const feetY = box.min.y;
+    const mouthY = feetY + h * 0.64;
     const frontZ = box.min.z;
-    const drop = Math.max(1, (mouthY - box.min.y) / voxel);
-    const hang = Math.min(stage, drop);
-    const trail = Math.max(0, stage - drop);
-    const height = voxel * (0.9 + hang);
-    const depth = voxel * (0.55 + trail);
-    let mesh = host.userData.hairMesh;
-    if (!mesh) {
-      if (host.userData.hairColor == null) host.userData.hairColor = this._hairN++ % this._hairMats.length;
-      mesh = new THREE.Mesh(BR, this._hairMats[host.userData.hairColor]);
-      mesh.name = 'beard';
-      mesh.castShadow = false;
-      host.add(mesh);
-      host.userData.hairMesh = mesh;
-    }
     const cx = (box.min.x + box.max.x) * 0.5;
-    mesh.scale.set(voxel * 1.6, height, depth);
-    mesh.position.set(cx, mouthY - height * 0.45, frontZ + depth * 0.35);
+    const dropRoom = Math.max(thick, mouthY - feetY);
+    /* Stage 1 is a chin beard. Each later step adds most of a body height and never stops. */
+    const length = thick * 1.6 + Math.max(0, stage - 1) * h * 0.7;
+    const hangLen = Math.min(length, dropRoom);
+    const trailLen = Math.max(0, length - dropRoom);
+    if (host.userData.hairColor == null) host.userData.hairColor = this._hairN++ % this._hairMats.length;
+    const mat = this._hairMats[host.userData.hairColor];
+    let hang = host.userData.hairMesh;
+    if (!hang) {
+      hang = new THREE.Mesh(BR, mat);
+      hang.name = 'beard';
+      hang.castShadow = false;
+      host.add(hang);
+      host.userData.hairMesh = hang;
+    }
+    hang.scale.set(thick * 1.7, hangLen, thick * 0.65);
+    hang.position.set(cx, mouthY - hangLen * 0.5, frontZ - thick * 0.05);
+    const anchor = host.userData.hairAnchor || (host.userData.hairAnchor = new THREE.Vector3());
+    anchor.set(cx, feetY, frontZ);
+    host.userData.hairThick = thick;
+    host.userData.hairTrailLen = trailLen;
+    if (!host.userData.hairPath) host.userData.hairPath = [];
     host.userData.hairStage = stage;
     return true;
   }
@@ -4920,9 +4927,166 @@ class Game {
       this.toast('Nobody here to grow a beard', 'bad');
       return;
     }
-    this.hair = { t: 0 };
+    this.hair = { t: 0, hosts };
     sfx.chime();
-    this.toast(`Hair — ${n} inhabitants sprouted a beard. It grows longer every 12 seconds.`, 'good');
+    this.toast(`Hair — ${n} inhabitants sprouted a beard. It grows every 12 seconds and follows their steps.`, 'good');
+  }
+
+  clearHairTrail() {
+    const mesh = this.hairTrail;
+    if (!mesh) return;
+    mesh.removeFromParent();
+    if (mesh.material) mesh.material.dispose();
+    this.hairTrail = null;
+  }
+
+  ensureHairTrail(need) {
+    let mesh = this.hairTrail;
+    if (mesh && mesh.instanceMatrix.count >= need) return mesh;
+    let cap = mesh ? mesh.instanceMatrix.count * 2 : 64;
+    while (cap < need) cap *= 2;
+    const mat = mesh ? mesh.material : mkMat(0xffffff);
+    const bigger = new THREE.InstancedMesh(BR, mat, cap);
+    bigger.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    bigger.count = 0;
+    bigger.frustumCulled = false;
+    bigger.castShadow = false;
+    bigger.receiveShadow = false;
+    if (mesh) mesh.removeFromParent();
+    this.scene.add(bigger);
+    this.hairTrail = bigger;
+    return bigger;
+  }
+
+  /* Head is where their feet are now. Older samples are where those feet have been. */
+  sampleHairHead(host, out) {
+    host.updateWorldMatrix(true, false);
+    out.copy(host.userData.hairAnchor).applyMatrix4(host.matrixWorld);
+    if (!host.userData.hairBack) {
+      const back = new THREE.Vector3(0, 0, 1).transformDirection(host.matrixWorld);
+      if (back.lengthSq() < 1e-8) back.set(0, 0, 1);
+      host.userData.hairBack = back;
+    }
+    const scale = Math.max(0.2, host.getWorldScale(this._hairScale).y);
+    host.userData.hairSpacing = Math.max(0.3, host.userData.hairThick * scale * 1.2);
+    host.userData.hairWorldLen = host.userData.hairTrailLen * scale;
+    return out;
+  }
+
+  hostHairVisible(host) {
+    for (let n = host; n; n = n.parent) if (!n.visible) return false;
+    return true;
+  }
+
+  /* Drop a brick every spacing along the walked path, then keep going straight from the oldest step. */
+  layHairHost(host, mesh, cursor) {
+    const path = host.userData.hairPath;
+    const spacing = host.userData.hairSpacing;
+    const count = host.userData.hairCount;
+    if (!count) return cursor;
+    const size = spacing * 0.86;
+    const back = host.userData.hairBack;
+    const head = this._hairHead;
+    const color = this._hairColors[host.userData.hairColor];
+    const q = this._hairQ.identity();
+    const sc = this._hairS.set(size, size * 0.72, size);
+    let pi = 0;
+    let bx = 0, by = 0, bz = 0;
+    const stepFrom = (x, y, z) => {
+      while (pi < path.length) {
+        const p = path[pi];
+        const d = Math.hypot(p.x - x, p.y - y, p.z - z);
+        pi++;
+        if (d > 1e-4) { bx = p.x; by = p.y; bz = p.z; return; }
+      }
+      let vx = back.x, vy = back.y, vz = back.z;
+      if (path.length >= 2) {
+        const a = path[path.length - 2], b = path[path.length - 1];
+        vx = b.x - a.x; vy = b.y - a.y; vz = b.z - a.z;
+      } else if (path.length === 1) {
+        vx = path[0].x - head.x; vy = path[0].y - head.y; vz = path[0].z - head.z;
+      }
+      let dl = Math.hypot(vx, vy, vz);
+      if (dl < 1e-5) { vx = back.x; vy = back.y; vz = back.z; dl = Math.hypot(vx, vy, vz) || 1; }
+      bx = x + vx / dl; by = y + vy / dl; bz = z + vz / dl;
+    };
+    let ax = head.x, ay = head.y, az = head.z;
+    stepFrom(ax, ay, az);
+    let dx = bx - ax, dy = by - ay, dz = bz - az;
+    let seg = Math.hypot(dx, dy, dz) || 1;
+    let remain = 0;
+    for (let i = 0; i < count; i++) {
+      const dist = i * spacing;
+      let guard = 0;
+      while (remain + seg < dist && guard < 8) {
+        remain += seg;
+        ax = bx; ay = by; az = bz;
+        stepFrom(ax, ay, az);
+        dx = bx - ax; dy = by - ay; dz = bz - az;
+        seg = Math.hypot(dx, dy, dz) || 1;
+        guard++;
+      }
+      const t = Math.max(0, Math.min(1, (dist - remain) / seg));
+      this._hairM.compose(
+        this._hairV.set(ax + dx * t, ay + dy * t + size * 0.4, az + dz * t),
+        q, sc
+      );
+      mesh.setMatrixAt(cursor, this._hairM);
+      mesh.setColorAt(cursor, color);
+      cursor++;
+    }
+    return cursor;
+  }
+
+  slitherHair() {
+    const hosts = this.hair && this.hair.hosts;
+    if (!hosts) return;
+    if (!this._hairHead) {
+      this._hairHead = new THREE.Vector3();
+      this._hairScale = new THREE.Vector3();
+      this._hairM = new THREE.Matrix4();
+      this._hairQ = new THREE.Quaternion();
+      this._hairS = new THREE.Vector3();
+      this._hairV = new THREE.Vector3();
+      this._hairColors = [0x2a1a10, 0x1a120c, 0x6b3a1e, 0xc4a574, 0x3a3a3a, 0x8b1e1e, 0xe6d3a3].map((hex) => new THREE.Color(hex));
+    }
+    let total = 0;
+    const live = [];
+    for (const host of hosts) {
+      if (!host.userData.hairAnchor || !this.hostHairVisible(host)) {
+        host.userData.hairCount = 0;
+        continue;
+      }
+      const head = this.sampleHairHead(host, this._hairHead);
+      const path = host.userData.hairPath;
+      const spacing = host.userData.hairSpacing;
+      if (!path.length || head.distanceTo(path[0]) >= spacing * 0.85) path.unshift(head.clone());
+      let keep = host.userData.hairWorldLen + spacing * 40;
+      let acc = 0;
+      for (let i = 1; i < path.length; i++) {
+        acc += path[i - 1].distanceTo(path[i]);
+        if (acc >= keep) { path.length = i + 1; break; }
+      }
+      const count = host.userData.hairWorldLen > spacing * 0.35 ? Math.ceil(host.userData.hairWorldLen / spacing) : 0;
+      host.userData.hairCount = count;
+      if (count) {
+        live.push(host);
+        total += count;
+      }
+    }
+    if (!total) {
+      if (this.hairTrail) this.hairTrail.count = 0;
+      return;
+    }
+    const mesh = this.ensureHairTrail(total);
+    let cursor = 0;
+    for (const host of live) {
+      this.sampleHairHead(host, this._hairHead);
+      cursor = this.layHairHost(host, mesh, cursor);
+    }
+    mesh.count = cursor;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   tickHair(dt) {
@@ -4932,10 +5096,11 @@ class Game {
     while (this.hair.t >= 12 && guard < 8) {
       this.hair.t -= 12;
       guard++;
-      for (const host of this.collectHairHosts()) {
-        this.poseHair(host, (host.userData.hairStage || 1) + 1);
-      }
+      const hosts = this.collectHairHosts();
+      this.hair.hosts = hosts;
+      for (const host of hosts) this.poseHair(host, (host.userData.hairStage || 1) + 1);
     }
+    this.slitherHair();
   }
 
   updateNuke(dt) {
@@ -5685,6 +5850,7 @@ class Game {
   regenerateWorld() {
     this.defuseNuke();
     sfx.setCrickets(false);
+    this.clearHairTrail();
     this.hair = null;
     this.stopGodzilla({ quiet: true });
     if (this.bonus) this.finishBonus({ quiet: true, restore: false });
