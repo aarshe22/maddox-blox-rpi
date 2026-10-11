@@ -93,7 +93,7 @@ try {
     try { var c=document.createElement("canvas"); gl=!!(c.getContext("webgl2")||c.getContext("webgl")||c.getContext("experimental-webgl")); } catch(e) { gl="error: "+describe(e); }
     return ["Maddox Blox bootstrap diagnostics","URL: "+location.href,"UA: "+navigator.userAgent,"Platform: "+navigator.platform,"Touch points: "+(navigator.maxTouchPoints||0),"WebGL available: "+gl,"Native import maps: "+!!(window.HTMLScriptElement&&HTMLScriptElement.supports&&HTMLScriptElement.supports("importmap")),"es-module-shims: "+(typeof window.importShim==="function"?"ready":"not ready"),""].join("\n")+lines.join("\n");
   }
-  window.MB_BOOT = { add:add, fail:function(e){ add("FATAL",e); status.textContent="Game startup failed — diagnostics captured below."; panel.hidden=false; }, ready:function(){ add("READY","Game module started"); status.textContent="Game module started."; }, dump:snapshot };
+  window.MB_BOOT = { add:add, fail:function(e){ add("FATAL",e); status.textContent="Game startup failed — diagnostics captured below."; panel.hidden=false; }, ready:function(){ add("MODULE","Game module loader completed"); status.textContent="Game module loaded — waiting for first rendered frame…"; }, rendered:function(){ add("READY","First 3D frame rendered"); status.textContent="Game rendered successfully."; panel.hidden=true; var b=document.getElementById("bootstrap-options"); if(b)b.style.display="none"; }, dump:snapshot };
   add("BOOT","Bootstrap UI loaded");
   window.addEventListener("error",function(e){ add("ERROR",(e.message||"error")+" @ "+(e.filename||"")+" :"+(e.lineno||0)+":"+(e.colno||0)); if(e.error)add("STACK",e.error); if(e.target && e.target !== window && e.target.src)add("RESOURCE",e.target.src); });
   window.addEventListener("unhandledrejection",function(e){ add("REJECTION",e.reason); });
@@ -202,8 +202,8 @@ try {
     try {
       var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
       note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
-      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=61'); }
-      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); note('LOADER','declarative shim import map registered'); var app=document.createElement('script'); app.type='module-shim'; app.src='./src/main.js?v=61'; app.addEventListener('error',function(e){ if(window.MB_BOOT) MB_BOOT.fail(e && e.error ? e.error : new Error('module-shim failed to load')); }); document.body.appendChild(app); }
+      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=62'); }
+      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); note('LOADER','declarative shim import map registered'); var app=document.createElement('script'); app.type='module-shim'; app.src='./src/main.js?v=62'; app.addEventListener('error',function(e){ if(window.MB_BOOT) MB_BOOT.fail(e && e.error ? e.error : new Error('module-shim failed to load')); }); document.body.appendChild(app); }
       if(window.MB_BOOT) MB_BOOT.ready();
     } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
   })();
