@@ -202,8 +202,8 @@ try {
     try {
       var local=await localThreeExists(), three=local?localThree:cdnThree, addons=local?localAddons:cdnAddons;
       note('LOADER',(nativeMaps?'native import map':'shim import map')+'; three='+(local?'local':'CDN'));
-      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=59'); }
-      else { await waitForShim(); mapFor(three,addons,'importmap-shim'); await window.importShim('./src/main.js?v=59'); }
+      if(nativeMaps){ mapFor(three,addons,'importmap'); await import('./src/main.js?v=60'); }
+      else { await waitForShim(); await window.importShim.addImportMap({ imports: { three: three, 'three/addons/': addons } }); note('LOADER','shim import map registered'); await window.importShim('./src/main.js?v=60'); }
       if(window.MB_BOOT) MB_BOOT.ready();
     } catch(e) { if(window.MB_BOOT) MB_BOOT.fail(e); else console.error(e); }
   })();
