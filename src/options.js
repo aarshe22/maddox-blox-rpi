@@ -44,6 +44,70 @@ export function resolutionSize(id) {
   return RESOLUTIONS.find((r) => r.id === id) || RESOLUTIONS[0];
 }
 
+/* A positive count is cut in half. One that would fall below 1 stays at 1.
+   Zero stays off, so a disabled object is not switched on. */
+export function halfCount(n) {
+  n = Math.round(Number(n));
+  if (!(n > 0)) return 0;
+  const h = Math.round(n / 2);
+  return h < 1 ? 1 : h;
+}
+
+/* Raspberry Pi 4's GPU is VideoCore VI, which Chromium reports as V3D 4.x.
+   Pi 5 is V3D 7.x. iPhone, iPad, Android, and desktop GPUs never report V3D 4,
+   and their user agents are rejected first so a spoofed renderer cannot lock them. */
+export function looksLikePi4(ua, renderer, platform, maxTouchPoints) {
+  const agent = String(ua || '');
+  if (/Android|iPhone|iPad|iPod|Windows NT|Macintosh|Mac OS X|CrOS/i.test(agent)) return false;
+  if (platform === 'MacIntel' && maxTouchPoints > 1) return false;
+  const gpu = String(renderer || '');
+  return /V3D[\s-]*4(?:\.|\s|$)/i.test(gpu) || /VideoCore\s*(?:VI|6)\b/i.test(gpu);
+}
+
+function gpuRenderer() {
+  try {
+    if (typeof document === 'undefined') return '';
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) return '';
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const unmasked = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+    const plain = gl.getParameter(gl.RENDERER);
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+    return `${unmasked || ''} ${plain || ''}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+export function isRaspberryPi4() {
+  if (typeof navigator === 'undefined') return false;
+  return looksLikePi4(navigator.userAgent, gpuRenderer(), navigator.platform, navigator.maxTouchPoints);
+}
+
+/* Tiny-map counts, halved, for the Pi 4 lock. */
+export function piObjectCounts() {
+  const base = countsForSize('tiny');
+  const counts = {}, enabled = {};
+  for (const t of OBJECT_TYPES) {
+    counts[t.id] = halfCount(base.counts[t.id]);
+    enabled[t.id] = counts[t.id] > 0;
+  }
+  return { counts, enabled };
+}
+
+export function piDefaults() {
+  const o = defaultOptions();
+  const pi = piObjectCounts();
+  o.size = 'tiny';
+  o.resolution = 'low';
+  o.counts = pi.counts;
+  o.enabled = pi.enabled;
+  o.piHalf = 1;
+  return o;
+}
+
 const LS_KEY = 'maddox-blox-options-pi2';
 
 export function sizeHalf(id) {
@@ -86,26 +150,44 @@ export function loadOptions() {
   const o = defaultOptions();
   try {
     const raw = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-    if (!raw || !raw.counts) return o;
-    if (SIZES.some((s) => s.id === raw.size)) o.size = raw.size;
-    if (typeof raw.sound === 'boolean') o.sound = raw.sound;
-    if (typeof raw.debug === 'boolean') o.debug = raw.debug;
-    if (RESOLUTIONS.some((r) => r.id === raw.resolution)) o.resolution = raw.resolution;
-    const keepLife = raw.lifeRev === 2;
-    if (raw.life && typeof raw.life === 'object') {
-      for (const k of ['animals', 'birds', 'balloons']) {
-        if (k === 'birds' && !keepLife) continue;
-        if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
+    if (raw && raw.counts) {
+      if (SIZES.some((s) => s.id === raw.size)) o.size = raw.size;
+      if (typeof raw.sound === 'boolean') o.sound = raw.sound;
+      if (typeof raw.debug === 'boolean') o.debug = raw.debug;
+      if (RESOLUTIONS.some((r) => r.id === raw.resolution)) o.resolution = raw.resolution;
+      if (raw.piHalf === 1) o.piHalf = 1;
+      const keepLife = raw.lifeRev === 2;
+      if (raw.life && typeof raw.life === 'object') {
+        for (const k of ['animals', 'birds', 'balloons']) {
+          if (k === 'birds' && !keepLife) continue;
+          if (typeof raw.life[k] === 'boolean') o.life[k] = raw.life[k];
+        }
       }
+      for (const t of OBJECT_TYPES) {
+        const c = raw.counts[t.id];
+        if (typeof c === 'number' && isFinite(c)) o.counts[t.id] = Math.max(0, Math.min(t.max, Math.round(c)));
+        if (typeof raw.enabled[t.id] === 'boolean') o.enabled[t.id] = raw.enabled[t.id];
+      }
+      if (!keepLife) saveOptions(o);
     }
-    for (const t of OBJECT_TYPES) {
-      const c = raw.counts[t.id];
-      if (typeof c === 'number' && isFinite(c)) o.counts[t.id] = Math.max(0, Math.min(t.max, Math.round(c)));
-      if (typeof raw.enabled[t.id] === 'boolean') o.enabled[t.id] = raw.enabled[t.id];
-    }
-    if (!keepLife) saveOptions(o);
   } catch (e) { /* corrupted storage: defaults */ }
+  if (isRaspberryPi4()) applyPiLock(o);
   return o;
+}
+
+/* Pi 4 always plays Tiny at 360p. Object counts are halved once, then the
+   sliders stay editable. Size and resolution stay locked on later visits. */
+function applyPiLock(o) {
+  const already = o.piHalf === 1;
+  o.size = 'tiny';
+  o.resolution = 'low';
+  if (!already) {
+    const pi = piObjectCounts();
+    o.counts = pi.counts;
+    o.enabled = pi.enabled;
+  }
+  o.piHalf = 1;
+  saveOptions(o);
 }
 
 export function saveOptions(o) {
@@ -264,25 +346,48 @@ export function buildOptionsPanel(opts, hooks = {}) {
     sync();
   }
 
+  const pi = isRaspberryPi4();
+  if (pi) {
+    opts.size = 'tiny';
+    opts.resolution = 'low';
+    const note = el.querySelector('.o-note');
+    note.textContent = 'This Raspberry Pi 4 stays on Tiny and 360p, with half the usual objects. Other counts apply when you regenerate.';
+  }
+
   const segs = [...el.querySelectorAll('.o-size button')];
   const syncSegs = () => segs.forEach((b) => b.classList.toggle('active', b.dataset.size === opts.size));
-  for (const b of segs) b.addEventListener('click', () => {
-    opts.size = b.dataset.size;
-    const next = countsForSize(opts.size);
-    opts.counts = next.counts;
-    opts.enabled = next.enabled;
-    syncSegs();
-    for (const s of syncers) s();
-  });
+  for (const b of segs) {
+    if (pi && b.dataset.size !== 'tiny') {
+      b.disabled = true;
+      b.title = 'Tiny is locked on this Raspberry Pi 4';
+    }
+    b.addEventListener('click', () => {
+      if (pi && b.dataset.size !== 'tiny') return;
+      opts.size = b.dataset.size;
+      const next = pi ? piObjectCounts() : countsForSize(opts.size);
+      opts.counts = next.counts;
+      opts.enabled = next.enabled;
+      if (pi) opts.piHalf = 1;
+      syncSegs();
+      for (const s of syncers) s();
+    });
+  }
 
   const resBtns = [...el.querySelectorAll('.o-res button')];
   const syncRes = () => resBtns.forEach((b) => b.classList.toggle('active', b.dataset.res === (opts.resolution || 'low')));
-  for (const b of resBtns) b.addEventListener('click', () => {
-    opts.resolution = b.dataset.res;
-    syncRes();
-    saveOptions(opts);
-    if (hooks.onResolution) hooks.onResolution(opts.resolution);
-  });
+  for (const b of resBtns) {
+    if (pi && b.dataset.res !== 'low') {
+      b.disabled = true;
+      b.title = '360p is locked on this Raspberry Pi 4';
+    }
+    b.addEventListener('click', () => {
+      if (pi && b.dataset.res !== 'low') return;
+      opts.resolution = b.dataset.res;
+      syncRes();
+      saveOptions(opts);
+      if (hooks.onResolution) hooks.onResolution(opts.resolution);
+    });
+  }
   syncRes();
 
   /* Sound/voice + fall-debug toggles take effect immediately (no regen), and
@@ -426,11 +531,12 @@ export function buildOptionsPanel(opts, hooks = {}) {
   };
 
   el.querySelector('.o-reset').addEventListener('click', () => {
-    const fresh = defaultOptions();
+    const fresh = isRaspberryPi4() ? piDefaults() : defaultOptions();
     opts.size = fresh.size;
     opts.resolution = fresh.resolution;
     opts.counts = fresh.counts;
     opts.enabled = fresh.enabled;
+    if (fresh.piHalf) opts.piHalf = 1;
     saveOptions(opts);
     api.refresh();
     if (hooks.onResolution) hooks.onResolution(opts.resolution);

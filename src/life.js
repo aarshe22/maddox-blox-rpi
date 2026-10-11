@@ -137,6 +137,27 @@ function chickenMesh(rand) {
   return finish(g);
 }
 
+function sheepMesh(rand) {
+  const g = new THREE.Group();
+  const wool = mkMat(pick(rand, [0xf7f4ee, 0xe7e2d8, 0xfffaf2]));
+  const face = mkMat(0x2a241f);
+  box(g, wool, 0.46, 0.4, 0.62, 0, 0.42, 0);
+  box(g, wool, 0.52, 0.24, 0.42, 0, 0.58, 0.02);
+  box(g, face, 0.22, 0.2, 0.24, 0, 0.48, -0.4);
+  box(g, wool, 0.1, 0.08, 0.06, -0.12, 0.6, -0.34);
+  box(g, wool, 0.1, 0.08, 0.06, 0.12, 0.6, -0.34);
+  g.userData.legs = [
+    box(g, face, 0.08, 0.24, 0.08, -0.14, 0.12, 0.18),
+    box(g, face, 0.08, 0.24, 0.08, 0.14, 0.12, 0.18),
+    box(g, face, 0.08, 0.24, 0.08, -0.14, 0.12, -0.16),
+    box(g, face, 0.08, 0.24, 0.08, 0.14, 0.12, -0.16)
+  ];
+  return finish(g);
+}
+
+const FARM_H = { cow: 0.86, chicken: 0.47, sheep: 0.7 };
+const FARM_FORMS = ['cow', 'chicken', 'sheep'];
+
 function dogMesh(rand) {
   const g = new THREE.Group();
   const fur = mkMat(pick(rand, [0x9a5b3f, 0xd9b98a, 0x4a4a4a, 0xe8e0d0]));
@@ -478,6 +499,121 @@ export class Life {
       }
     }
     return this.counts();
+  }
+
+  /* People, animals, and riders become a cow, a chicken, or a sheep.
+     Nested figures keep their place. Walking creatures take the animal's size. */
+  herdAll(extraRoots = []) {
+    const seen = new Set();
+    let n = 0;
+    const apply = (group, creature, fit) => {
+      if (!group || seen.has(group) || group.userData.herd) return false;
+      seen.add(group);
+      const form = FARM_FORMS[Math.floor(this.rand() * FARM_FORMS.length)];
+      this.wearFarm(group, form, fit);
+      if (creature) {
+        creature.herd = form;
+        if (creature.kind === 'bird') {
+          creature.tx = creature.mesh.position.x;
+          creature.tz = creature.mesh.position.z;
+          creature.mesh.position.y = this.feetY(creature.mesh.position.x, creature.mesh.position.z);
+        }
+      }
+      return true;
+    };
+    for (const c of this.creatures) {
+      if (!c.alive || !c.mesh) continue;
+      const nests = [];
+      c.mesh.traverse((o) => {
+        if (o !== c.mesh && o.userData && o.userData.inhabitant) nests.push(o);
+      });
+      for (const o of nests) if (apply(o, null, true)) n++;
+      if (c.hp != null && apply(c.mesh, c, false)) n++;
+    }
+    for (const root of extraRoots) {
+      if (!root) continue;
+      const nests = [];
+      root.traverse((o) => {
+        if (o.userData && o.userData.inhabitant) nests.push(o);
+      });
+      for (const o of nests) if (apply(o, null, true)) n++;
+    }
+    return n;
+  }
+
+  wearFarm(group, form, fit) {
+    const saved = [...group.children];
+    let localH = FARM_H[form];
+    if (fit && saved.length) {
+      const box = new THREE.Box3();
+      for (const ch of saved) box.expandByObject(ch);
+      if (!box.isEmpty()) localH = Math.max(0.2, box.max.y - box.min.y);
+    }
+    const anim = {
+      legs: group.userData.legs || null,
+      arms: group.userData.arms || null,
+      tail: group.userData.tail || null,
+      wings: group.userData.wings || null,
+      scale: group.scale.clone(),
+      base: group.userData.baseScale ? group.userData.baseScale.clone() : null
+    };
+    for (const ch of saved) group.remove(ch);
+    const body = form === 'sheep' ? sheepMesh(this.rand) : form === 'chicken' ? chickenMesh(this.rand) : cowMesh(this.rand);
+    if (fit) body.scale.setScalar(localH / FARM_H[form]);
+    else {
+      group.scale.setScalar((PLAYER_H * 0.5) / FARM_H[form]);
+      if (group.userData.baseScale) group.userData.baseScale.copy(group.scale);
+    }
+    group.add(body);
+    group.userData.legs = body.userData.legs || null;
+    group.userData.arms = null;
+    group.userData.tail = body.userData.tail || null;
+    group.userData.wings = null;
+    group.userData.herd = form;
+    group.userData.herdSaved = saved;
+    group.userData.herdAnim = anim;
+    group.userData.herdBody = body;
+  }
+
+  clearHerd(extraRoots = []) {
+    const shared = new Set([BR, CY, SP]);
+    const restoreOne = (group) => {
+      if (!group || !group.userData.herd) return;
+      const body = group.userData.herdBody;
+      if (body) {
+        group.remove(body);
+        const gone = new Set();
+        body.traverse((o) => {
+          if (!o.isMesh) return;
+          if (o.material && !gone.has(o.material)) { gone.add(o.material); o.material.dispose(); }
+          if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
+        });
+      }
+      for (const ch of group.userData.herdSaved || []) group.add(ch);
+      const anim = group.userData.herdAnim;
+      if (anim) {
+        group.userData.legs = anim.legs;
+        group.userData.arms = anim.arms;
+        group.userData.tail = anim.tail;
+        group.userData.wings = anim.wings;
+        group.scale.copy(anim.scale);
+        if (anim.base && group.userData.baseScale) group.userData.baseScale.copy(anim.base);
+      }
+      delete group.userData.herd;
+      delete group.userData.herdSaved;
+      delete group.userData.herdAnim;
+      delete group.userData.herdBody;
+    };
+    const restoreDeep = (group) => {
+      if (!group) return;
+      if (group.userData && group.userData.herd) restoreOne(group);
+      for (const ch of [...group.children]) restoreDeep(ch);
+    };
+    for (const c of this.creatures) {
+      if (c.mesh) restoreDeep(c.mesh);
+      c.herd = null;
+    }
+    for (const root of extraRoots) restoreDeep(root);
   }
 
   /* Every person, animal, driver, and interior figure becomes one of the five monsters. */
@@ -843,7 +979,7 @@ export class Life {
         m.rotation.y = -a;
         continue;
       }
-      if (c.monster === 'bat') {
+      if (c.monster === 'bat' && !c.herd) {
         const a = c.t * 0.7 + c.yaw;
         const R = Math.max(4, c.homeR * 0.55);
         m.position.x = c.home.x + Math.cos(a) * R;
@@ -857,7 +993,7 @@ export class Life {
         }
         continue;
       }
-      if (c.kind === 'bird' && !c.monster) {
+      if (c.kind === 'bird' && !c.monster && !c.herd) {
         const a = c.t * 0.45 + c.yaw, R = Math.max(6, c.homeR * 0.7);
         m.position.x = c.home.x + Math.cos(a) * R;
         m.position.z = c.home.z + Math.sin(a) * R;
@@ -969,7 +1105,10 @@ export class Life {
           c.tz = clamp(c.home.z + Math.sin(a) * r, -w.half + 3, w.half - 3);
         }
       } else {
-        const sp = c.monster === 'zombie' ? 0.8
+        const sp = c.herd === 'chicken' ? 1.6
+          : c.herd === 'sheep' ? 1.15
+          : c.herd === 'cow' ? 1.0
+          : c.monster === 'zombie' ? 0.8
           : c.monster === 'skeleton' ? 1.35
           : c.monster === 'snake' ? 1.45
           : c.kind === 'cow' ? 1.0 : c.kind === 'chicken' ? 1.6 : 1.9;
@@ -982,7 +1121,7 @@ export class Life {
       m.rotation.y = c.yaw;
       m.rotation.x = 0;
       const gy = this.feetY(m.position.x, m.position.z);
-      const hover = c.monster === 'ghost' ? 1.2 + Math.sin(c.t * 2.2) * 0.28 : 0;
+      const hover = !c.herd && c.monster === 'ghost' ? 1.2 + Math.sin(c.t * 2.2) * 0.28 : 0;
       m.position.y += (gy + hover - m.position.y) * Math.min(1, dt * 9);
       const sw = Math.sin(c.walk * 7) * (c.walk > 0.05 ? 0.45 : 0.03);
       if (m.userData.legs) {

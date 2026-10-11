@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BR, CY, SP, CO, RAINBOW, GOAL, mkMat, applyFlatShade, clamp, part, addBox, addCyl, bake, merged, colorOfMat, brickCensus, BRICK_PILE_CAP } from './brickkit.js';
 import { makeInterior } from './interior.js';
-import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD } from './options.js?v=14';
+import { buildOptionsPanel, defaultOptions, loadOptions, saveOptions, sizePreset, resolutionSize, loadPadMap, DEFAULT_PAD, isRaspberryPi4, piDefaults } from './options.js?v=15';
 import { instancedMosaicMesh, monumentMosaic, plaqueTexture, welcomeTexture } from './mosaic.js';
 import { WEAPONS, Fx, buildWeaponModels, makeRocketMesh, makeSaucerMesh, rayAabb, nearestPointOnBox, voxelBox } from './weaponry.js?v=16';
 import { sfx } from './sfx.js?v=14';
 import { voice } from './voice.js?v=1';
-import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=3';
+import { Life, paintAqueous, paintFrozen, WORLD_FROST } from './life.js?v=4';
 import { Train } from './train.js';
-import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js';
+import { WEATHERS, SKY, ParticleField, StarField, Funnel, WaveFront } from './weather.js?v=1';
 import { sigOf, getState, setState, clearState } from './persist.js';
 
 /* Propeller course: hole is wider than the body, centered on the cruise chest. */
@@ -116,6 +116,7 @@ const STRIP_PICS = {
   tsunami: stripPic('<path d="M4 40c8-14 16-14 24 0s16 14 28 0v16H4z" fill="#35a7ff" stroke="#243044" stroke-width="3"/><path d="M4 48c8-8 16-8 24 0s16 8 28 0" fill="none" stroke="#8fd0ff" stroke-width="3"/>'),
   meteor: stripPic('<path d="M8 20c10 2 16 8 18 18" stroke="#ff7a18" stroke-width="6" stroke-linecap="round"/><circle cx="40" cy="40" r="14" fill="#c94f06" stroke="#243044" stroke-width="3"/><circle cx="34" cy="34" r="4" fill="#ffd23f"/>'),
   nuke: stripPic('<circle cx="32" cy="32" r="22" fill="#ffe14a" stroke="#243044" stroke-width="3"/><circle cx="32" cy="32" r="6" fill="#243044"/><path d="M32 10a8 8 0 0 1 0 14M18 42a8 8 0 0 1 12-8M46 42a8 8 0 0 0-12-8" fill="#243044"/>'),
+  herd: stripPic('<ellipse cx="32" cy="40" rx="18" ry="14" fill="#f4efe6" stroke="#243044" stroke-width="3"/><circle cx="22" cy="36" r="6" fill="#2a241f"/><circle cx="42" cy="44" r="5" fill="#2a241f"/><path d="M14 30c-2-12 8-14 10-4" fill="#f3e6c8" stroke="#243044" stroke-width="2"/><path d="M50 30c2-12-8-14-10-4" fill="#f3e6c8" stroke="#243044" stroke-width="2"/><ellipse cx="32" cy="46" rx="7" ry="4.5" fill="#f0a0b0" stroke="#243044" stroke-width="2"/><circle cx="28" cy="45" r="1.3" fill="#243044"/><circle cx="36" cy="45" r="1.3" fill="#243044"/>'),
   prop: stripPic('<circle cx="32" cy="42" r="13" fill="#ffcc66" stroke="#243044" stroke-width="3"/><path d="M16 40h32v5H16z" fill="#d23b2f" stroke="#243044" stroke-width="2"/><rect x="29" y="22" width="6" height="10" rx="1" fill="#22252b"/><path d="M8 20h48M32 8v24" stroke="#e8eef5" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="20" r="3.2" fill="#f4c430" stroke="#243044" stroke-width="2"/>'),
   godzilla: stripPic('<ellipse cx="32" cy="42" rx="13" ry="14" fill="#3f8f3a" stroke="#243044" stroke-width="3"/><circle cx="32" cy="20" r="11" fill="#57b34a" stroke="#243044" stroke-width="3"/><circle cx="28" cy="18" r="2" fill="#fff"/><circle cx="37" cy="18" r="2" fill="#fff"/><path d="M12 34l-8 8M52 34l8 8M24 54l-4 8M40 54l4 8" stroke="#2f6b2c" stroke-width="5" stroke-linecap="round"/><path d="M26 24h12" stroke="#1a1208" stroke-width="2" stroke-linecap="round"/>'),
   hair: stripPic('<circle cx="32" cy="26" r="16" fill="#ffcc99" stroke="#243044" stroke-width="3"/><circle cx="26" cy="23" r="2" fill="#243044"/><circle cx="38" cy="23" r="2" fill="#243044"/><path d="M12 34c5 3 9 5 14 1 3 5 9 5 12 1 5 4 9 2 14-1-3 8-10 9-14 6-4 3-11 2-12-6z" fill="#4a2c18" stroke="#243044" stroke-width="2"/><path d="M26 42h12v5c0 9-12 11-12 2z" fill="#4a2c18" stroke="#243044" stroke-width="2"/>'),
@@ -2459,6 +2460,7 @@ class Player {
     const hip = new THREE.Group();
     hip.position.y = 0.72;
     g.add(hip);
+    this.hip = hip;
 
     const box = (mat, w, h, d, x, y, z, parent) => {
       const m = new THREE.Mesh(BR, mat);
@@ -2566,8 +2568,82 @@ class Player {
   }
 
   setPropeller(on) {
+    if (this.cowOn) {
+      if (this.hatParts) for (const part of this.hatParts) part.visible = false;
+      if (this.propHat) this.propHat.visible = false;
+      return;
+    }
     if (this.hatParts) for (const part of this.hatParts) part.visible = !on;
     if (this.propHat) this.propHat.visible = !!on;
+  }
+
+  /* Upright cow on the same two legs and arms, so the walk cycle still swings. */
+  setCow(on) {
+    if (on) this.showCow();
+    else this.hideCow();
+  }
+
+  showCow() {
+    if (this.cowOn) return;
+    this.cowOn = true;
+    this._cowHidden = [];
+    this.root.traverse((o) => {
+      if (!o.isMesh) return;
+      this._cowHidden.push([o, o.visible]);
+      o.visible = false;
+    });
+    const hide = mkMat(0xf4efe6);
+    const patch = mkMat(0x2a241f);
+    const pink = mkMat(0xf0a0b0);
+    const horn = mkMat(0xf3e6c8);
+    const add = (parent, mat, w, h, d, x, y, z) => {
+      const m = new THREE.Mesh(BR, mat);
+      m.scale.set(w, h, d);
+      m.position.set(x, y, z);
+      m.castShadow = false;
+      m.userData.cowPart = true;
+      parent.add(m);
+      return m;
+    };
+    const hip = this.hip;
+    add(hip, hide, 0.78, 0.62, 0.52, 0, 0.28, 0.02);
+    add(hip, patch, 0.36, 0.28, 0.54, 0.1, 0.46, 0.04);
+    add(hip, hide, 0.48, 0.42, 0.44, 0, 0.86, -0.06);
+    add(hip, pink, 0.3, 0.16, 0.22, 0, 0.74, -0.28);
+    add(hip, patch, 0.07, 0.07, 0.04, -0.1, 0.9, -0.28);
+    add(hip, patch, 0.07, 0.07, 0.04, 0.1, 0.9, -0.28);
+    add(hip, horn, 0.08, 0.18, 0.08, -0.16, 1.14, 0);
+    add(hip, horn, 0.08, 0.18, 0.08, 0.16, 1.14, 0);
+    add(hip, hide, 0.14, 0.08, 0.06, -0.3, 0.92, -0.02);
+    add(hip, hide, 0.14, 0.08, 0.06, 0.3, 0.92, -0.02);
+    add(hip, hide, 0.08, 0.32, 0.08, 0, 0.4, 0.3);
+    add(hip, patch, 0.1, 0.1, 0.08, 0, 0.22, 0.32);
+    for (const leg of this.legs) {
+      add(leg, hide, 0.24, 0.62, 0.24, 0, -0.32, 0);
+      add(leg, patch, 0.26, 0.12, 0.3, 0, -0.68, -0.04);
+    }
+    for (const arm of this.arms) {
+      add(arm, hide, 0.2, 0.4, 0.2, 0, -0.2, 0);
+      add(arm, patch, 0.18, 0.1, 0.18, 0, -0.46, 0);
+    }
+  }
+
+  hideCow() {
+    if (!this.cowOn) return;
+    const drop = [];
+    this.root.traverse((o) => { if (o.userData && o.userData.cowPart) drop.push(o); });
+    const gone = new Set();
+    for (const mesh of drop) {
+      if (mesh.material && !gone.has(mesh.material)) {
+        gone.add(mesh.material);
+        mesh.material.dispose();
+      }
+      mesh.removeFromParent();
+    }
+    this.cowOn = false;
+    for (const [mesh, vis] of this._cowHidden || []) mesh.visible = vis;
+    this._cowHidden = null;
+    this.setPropeller(!!this.flying);
   }
 
   /* Body, hit capsule, and held gear share one scale. The rig is a child of root. */
@@ -3201,11 +3277,12 @@ class Game {
       el.className = 'slot';
       el.title = `${w.name} — ${w.dmg} dmg`;
       el.innerHTML = `<span class="key">${i + 1}</span><span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
+      el.addEventListener('pointerdown', (e) => { el._touchPick = e.pointerType === 'touch'; });
       el.addEventListener('click', (e) => {
         e.preventDefault();
         this.setMode('weapon');
         this.confirmWeapon(i + 1);
-        if (document.body.classList.contains('touch')) this.setMode('explore');
+        if (el._touchPick || document.body.classList.contains('touch')) this.closeCommandStrip();
       });
       this.stripBar.appendChild(el);
       return el;
@@ -3226,10 +3303,11 @@ class Game {
       el.className = 'slot weather-w';
       el.title = w.name;
       el.innerHTML = `<span class="wicon">${stripPicture(w.id)}</span><span class="wlabel">${w.name}</span>`;
+      el.addEventListener('pointerdown', (e) => { el._touchPick = e.pointerType === 'touch'; });
       el.addEventListener('click', (e) => {
         e.preventDefault();
         this.onWeatherClick(w.id);
-        if (document.body.classList.contains('touch')) this.setMode('explore');
+        if (el._touchPick || document.body.classList.contains('touch')) this.closeCommandStrip();
       });
       this.stripBar.appendChild(el);
       return el;
@@ -3251,7 +3329,7 @@ class Game {
     }
   }
 
-  setMode(mode) {
+  setMode(mode, opts = {}) {
     if (this.bonus) {
       if (mode !== 'explore') this.toast('Finish the bonus round first', 'good');
       return;
@@ -3262,7 +3340,7 @@ class Game {
       const wi = WEATHERS.findIndex((w) => w.id === this.weather);
       this.stripFocus = wi < 0 ? 1 : wi + 1;
       sfx.swap();
-      this.toast('Weather — stick moves, A activates, Y closes', 'good');
+      this.toast('Weather — stick moves, A selects and returns to explore, Y closes', 'good');
       this.refreshStrips();
       return;
     }
@@ -3271,13 +3349,22 @@ class Game {
     sfx.swap();
     if (mode === 'weapon') {
       this.stripFocus = this.equipped == null ? 0 : this.equipped + 1;
-      this.toast('Weapons — stick moves, A selects, X keeps it', 'good');
+      this.toast('Weapons — stick moves, A selects and returns to explore', 'good');
     }
-    else if (mode === 'explore') {
-      const held = this.equipped == null ? '' : ` ${WEAPONS[this.equipped].name} ready — A or F fires.`;
+    else if (mode === 'explore' && !opts.quiet) {
+      const held = this.armedWeapon() ? ` ${this.armedWeapon().name} ready — A or F fires.` : '';
       this.toast('Explore mode.' + held, 'good');
     }
     this.refreshStrips();
+  }
+
+  /* Controller confirm and a touch tap leave the weapon or weather running
+     and hide the strip so A and a screen tap can shoot. */
+  closeCommandStrip() {
+    if (this.mode !== 'weapon' && this.mode !== 'weather') return;
+    const def = this.mode === 'weapon' ? this.armedWeapon() : null;
+    this.setMode('explore', { quiet: true });
+    if (def) this.toast(`${def.name} ready — A or F fires.`, 'good');
   }
 
 
@@ -3925,6 +4012,7 @@ class Game {
   /* ------------------------------------------------ weather activation */
   activateWeather(id) {
     const def = WEATHERS.find((w) => w.id === id) || WEATHERS[0];
+    const prev = this.weather;
     voice.speak(def.name);
     this.weather = def.id;
     this.tornadoLeaving = false;
@@ -3947,6 +4035,7 @@ class Game {
     sfx.setCrickets(def.id === 'night');
     if (def.id === 'clear') this.defuseNuke();
     if (def.id !== 'quake') this.clearChasm();
+    if (prev === 'herd') this.clearHerd();
     this.rain.points.visible = false;
     this.snowf.points.visible = false;
     this.funnel.show(false);
@@ -3976,12 +4065,31 @@ class Game {
         this.waveZ = -this.world.half - 14; break;
       case 'meteor': sfx.meteorWhistle(); this.spawnMeteor(); break;
       case 'nuke': break; // armed by onWeatherClick only (one-shot air-drop)
+      case 'herd': this.startHerd(); break;
       default: break; // clear/morning/noon/evening/night: ambience only
     }
     this.applyOutdoorFog();
     this.refreshStrips();
     this.dispatchFireTruck(def);
-    this.toast(`${def.icon} ${def.name} — ${def.dmg ? `${def.dmg} damage every ${def.every}s` : 'no damage, sky only'}`, 'good');
+    if (def.id === 'herd') {
+      const n = this._herdN || 0;
+      this.toast(n
+        ? `🐄 Barnyard — ${n} inhabitants are cows, chickens, or sheep. You walk on two legs.`
+        : '🐄 Barnyard — you are a cow on two legs.', 'good');
+    } else {
+      this.toast(`${def.icon} ${def.name} — ${def.dmg ? `${def.dmg} damage every ${def.every}s` : 'no damage, sky only'}`, 'good');
+    }
+  }
+
+  startHerd() {
+    this._herdN = this.life ? this.life.herdAll(this.scenarioRoots()) : 0;
+    if (this.player) this.player.setCow(true);
+  }
+
+  clearHerd() {
+    if (this.life) this.life.clearHerd(this.scenarioRoots());
+    if (this.player) this.player.setCow(false);
+    this._herdN = 0;
   }
 
   /* Damage weather flags a dispatch target; Life drives the parked fire
@@ -5929,16 +6037,21 @@ class Game {
 
   /* Both bumpers: throw away the current world and build a small one from defaults. */
   resetSmallWorld() {
-    const fresh = defaultOptions();
-    fresh.size = 'small';
+    const fresh = isRaspberryPi4() ? piDefaults() : defaultOptions();
+    if (!isRaspberryPi4()) fresh.size = 'small';
     const opts = this.world.opts;
     opts.size = fresh.size;
     opts.counts = fresh.counts;
     opts.enabled = fresh.enabled;
+    if (isRaspberryPi4()) {
+      opts.resolution = 'low';
+      opts.piHalf = 1;
+    }
     opts.life = fresh.life;
     opts.sound = fresh.sound;
     opts.debug = fresh.debug;
     saveOptions(opts);
+    if (isRaspberryPi4()) this.resize();
     if (this.panel) this.panel.refresh();
     sfx.setMuted(!opts.sound);
     voice.setEnabled(opts.sound);
@@ -6395,8 +6508,14 @@ class Game {
       if (this.doorAction) this.toggleDoor();
       else if (!armed) this.jumpQueued = 0.16;
     }
-    if (this.mode === 'weather' && confirm.edge) this.confirmStrip();
-    if (this.mode === 'weapon' && confirm.edge) this.confirmWeapon(this.stripFocus ?? 0);
+    if (this.mode === 'weather' && confirm.edge) {
+      this.confirmStrip();
+      this.closeCommandStrip();
+    }
+    if (this.mode === 'weapon' && confirm.edge) {
+      this.confirmWeapon(this.stripFocus ?? 0);
+      this.closeCommandStrip();
+    }
     if (act('back').edge && selectMode) this.setMode('explore');
     if (act('weapons').edge) this.setMode(this.mode === 'weapon' ? 'explore' : 'weapon');
     if (act('weather').edge) this.setMode(this.mode === 'weather' ? 'explore' : 'weather');
